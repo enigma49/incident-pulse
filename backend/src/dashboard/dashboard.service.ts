@@ -3,8 +3,27 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Incident, IncidentDocument, IncidentSeverity, IncidentStatus } from '../incidents/schemas/incident.schema';
 import { Team, TeamDocument } from '../teams/schemas/team.schema';
+import {
+  AIInvestigation,
+  AIInvestigationDocument,
+  AIInvestigationStatus,
+  ProposedActionStatus,
+} from '../ai/schemas/ai-investigation.schema';
 import { AuditService } from '../audit/audit.service';
 import { RedisService, CACHE_KEYS, CACHE_TTLS } from '../common/redis/redis.service';
+
+export interface AIInvestigationMetrics {
+  total: number;
+  queued: number;
+  running: number;
+  completed: number;
+  failed: number;
+  pendingApprovalActions: number;
+  executedActions: number;
+  rejectedActions: number;
+  avgConfidence: number;
+  recentInvestigations: any[];
+}
 
 export interface DashboardOverview {
   totalIncidents: number;
@@ -16,6 +35,7 @@ export interface DashboardOverview {
   statusBreakdown: Record<string, number>;
   serviceBreakdown: Record<string, number>;
   teamWorkload: any[];
+  aiOverview: AIInvestigationMetrics;
   recentIncidents: any[];
   recentActivity: any[];
   cachedAt?: string;
@@ -29,6 +49,8 @@ export class DashboardService {
   constructor(
     @InjectModel(Incident.name) private incidentModel: Model<IncidentDocument>,
     @InjectModel(Team.name) private teamModel: Model<TeamDocument>,
+    @InjectModel(AIInvestigation.name)
+    private aiInvestigationModel: Model<AIInvestigationDocument>,
     private auditService: AuditService,
     private redisService: RedisService,
   ) {}
@@ -58,6 +80,12 @@ export class DashboardService {
       serviceAgg,
       teams,
       teamIncidentsAgg,
+      aiStatusAgg,
+      aiPendingApprovalCount,
+      aiExecutedCount,
+      aiRejectedCount,
+      aiAvgConfidenceAgg,
+      recentInvestigations,
       recentIncidents,
       recentActivity,
     ] = await Promise.all([
@@ -90,6 +118,27 @@ export class DashboardService {
           },
         },
       ]),
+      // AI Aggregations
+      this.aiInvestigationModel.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
+      this.aiInvestigationModel.countDocuments({
+        'proposedAction.status': ProposedActionStatus.PENDING_APPROVAL,
+      }),
+      this.aiInvestigationModel.countDocuments({
+        'proposedAction.status': ProposedActionStatus.EXECUTED,
+      }),
+      this.aiInvestigationModel.countDocuments({
+        'proposedAction.status': ProposedActionStatus.REJECTED,
+      }),
+      this.aiInvestigationModel.aggregate([
+        { $match: { status: AIInvestigationStatus.COMPLETED } },
+        { $group: { _id: null, avgConf: { $avg: '$confidence' } } },
+      ]),
+      this.aiInvestigationModel
+        .find()
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .populate('incidentId', 'title service severity status')
+        .exec(),
       this.incidentModel
         .find()
         .sort({ createdAt: -1 })
@@ -141,6 +190,39 @@ export class DashboardService {
       };
     });
 
+    // Format AI Investigation Metrics
+    const aiStatusCounts: Record<string, number> = {
+      QUEUED: 0,
+      RUNNING: 0,
+      COMPLETED: 0,
+      FAILED: 0,
+    };
+    let totalAiInvestigations = 0;
+    aiStatusAgg.forEach((item) => {
+      if (item._id && aiStatusCounts[item._id] !== undefined) {
+        aiStatusCounts[item._id] = item.count;
+      }
+      totalAiInvestigations += item.count || 0;
+    });
+
+    const avgConfidence =
+      aiAvgConfidenceAgg.length > 0 && aiAvgConfidenceAgg[0].avgConf
+        ? Math.round(aiAvgConfidenceAgg[0].avgConf)
+        : 0;
+
+    const aiOverview: AIInvestigationMetrics = {
+      total: totalAiInvestigations,
+      queued: aiStatusCounts.QUEUED,
+      running: aiStatusCounts.RUNNING,
+      completed: aiStatusCounts.COMPLETED,
+      failed: aiStatusCounts.FAILED,
+      pendingApprovalActions: aiPendingApprovalCount,
+      executedActions: aiExecutedCount,
+      rejectedActions: aiRejectedCount,
+      avgConfidence,
+      recentInvestigations,
+    };
+
     const overview: DashboardOverview = {
       totalIncidents: total,
       openIncidents: open,
@@ -151,6 +233,7 @@ export class DashboardService {
       statusBreakdown,
       serviceBreakdown,
       teamWorkload,
+      aiOverview,
       recentIncidents,
       recentActivity,
       cachedAt: new Date().toISOString(),
@@ -167,4 +250,3 @@ export class DashboardService {
     return overview;
   }
 }
-

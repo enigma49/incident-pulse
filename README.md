@@ -263,8 +263,29 @@ Before any approved action is executed, the backend validates the live incident 
 - `POST /incidents/:id/investigation/actions/reject`: Reject latest pending action (optional body: `{ "reason": "..." }`).
 - `POST /incidents/:id/investigations/:investigationId/actions/reject`: Reject specific action by investigation ID.
 
+---
 
+## Operations Dashboard & AI Oversight
 
+The IncidentPulse platform features a mission-control command center located at `/`:
 
+### 1. Executive Operations Metrics
+- **Active Incidents**: Live counter of open and mitigating incidents across services.
+- **Critical P1/P2 Active**: High-priority alert banner with immediate visual status badges.
+- **Mitigated / Under Control**: Real-time count of stabilized incidents.
+- **Pending Human Approval Gate**: Dedicated count of autonomous AI action recommendations requiring operator authorization.
+- **Total Volume**: Overall incident ingestion count.
 
+### 2. AI Investigation Engine & Human Oversight Center
+- **Autonomous Worker Status**: Real-time worker operational status, queued, running, and completed counters.
+- **Confidence Scoring**: Average confidence percentage across all grounded investigations.
+- **Human Review Queue**: Instant triage feed showing pending proposed actions (severity changes, status updates, auto-remediation task creation, responder assignments) with direct jump-links to incident authorization modals.
+- **Recent Investigation Findings**: Live feed of completed AI root cause analyses, hypothesized factors, and confidence intervals.
 
+### 3. Team Operational Workload & Capacity
+- Real-time MongoDB aggregation mapping active incidents and critical load per on-call responder team.
+- Service ownership attribution and automated capacity badges (`Normal Load`, `Moderate Load`, `High Load`).
+
+### 4. Real-time Telemetry & Stream
+- Unified live audit log streaming incidents, correlated alerts, comments, checklist tasks, and AI events over WebSockets.
+- Automatic reconnection refetching to guarantee zero desynchronization.

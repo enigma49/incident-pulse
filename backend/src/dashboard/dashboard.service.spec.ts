@@ -3,14 +3,16 @@ import { DashboardService } from './dashboard.service';
 import { getModelToken } from '@nestjs/mongoose';
 import { Incident } from '../incidents/schemas/incident.schema';
 import { Team } from '../teams/schemas/team.schema';
+import { AIInvestigation } from '../ai/schemas/ai-investigation.schema';
 import { AuditService } from '../audit/audit.service';
 import { RedisService, CACHE_KEYS, CACHE_TTLS } from '../common/redis/redis.service';
 
-describe('DashboardService Caching', () => {
+describe('DashboardService Caching & Aggregations (Phase 8)', () => {
   let service: DashboardService;
   let redisService: jest.Mocked<Partial<RedisService>>;
   let incidentModel: any;
   let teamModel: any;
+  let aiInvestigationModel: any;
 
   beforeEach(async () => {
     redisService = {
@@ -36,7 +38,23 @@ describe('DashboardService Caching', () => {
 
     teamModel = {
       find: jest.fn().mockReturnValue({
-        exec: jest.fn().mockResolvedValue([]),
+        exec: jest.fn().mockResolvedValue([
+          { _id: 'team-1', name: 'Core Infrastructure', serviceResponsibility: ['auth-service'] },
+        ]),
+      }),
+    };
+
+    aiInvestigationModel = {
+      countDocuments: jest.fn().mockResolvedValue(3),
+      aggregate: jest.fn().mockResolvedValue([{ _id: 'COMPLETED', count: 12 }, { _id: null, avgConf: 88 }]),
+      find: jest.fn().mockReturnValue({
+        sort: jest.fn().mockReturnValue({
+          limit: jest.fn().mockReturnValue({
+            populate: jest.fn().mockReturnValue({
+              exec: jest.fn().mockResolvedValue([]),
+            }),
+          }),
+        }),
       }),
     };
 
@@ -45,6 +63,7 @@ describe('DashboardService Caching', () => {
         DashboardService,
         { provide: getModelToken(Incident.name), useValue: incidentModel },
         { provide: getModelToken(Team.name), useValue: teamModel },
+        { provide: getModelToken(AIInvestigation.name), useValue: aiInvestigationModel },
         {
           provide: AuditService,
           useValue: { findRecent: jest.fn().mockResolvedValue([]) },
@@ -57,7 +76,7 @@ describe('DashboardService Caching', () => {
   });
 
   it('should return cached overview with fromCache=true on cache hit', async () => {
-    const cachedOverview = {
+    const cachedOverview: any = {
       totalIncidents: 42,
       openIncidents: 10,
       criticalIncidents: 4,
@@ -67,6 +86,18 @@ describe('DashboardService Caching', () => {
       statusBreakdown: { OPEN: 10, INVESTIGATING: 5, MITIGATED: 5, RESOLVED: 22 },
       serviceBreakdown: {},
       teamWorkload: [],
+      aiOverview: {
+        total: 15,
+        queued: 0,
+        running: 1,
+        completed: 13,
+        failed: 1,
+        pendingApprovalActions: 2,
+        executedActions: 5,
+        rejectedActions: 1,
+        avgConfidence: 86,
+        recentInvestigations: [],
+      },
       recentIncidents: [],
       recentActivity: [],
       fromCache: false,
@@ -78,6 +109,7 @@ describe('DashboardService Caching', () => {
 
     expect(result.fromCache).toBe(true);
     expect(result.totalIncidents).toBe(42);
+    expect(result.aiOverview.pendingApprovalActions).toBe(2);
     expect(incidentModel.countDocuments).not.toHaveBeenCalled();
   });
 
@@ -88,11 +120,12 @@ describe('DashboardService Caching', () => {
 
     expect(result.fromCache).toBe(false);
     expect(incidentModel.countDocuments).toHaveBeenCalled();
+    expect(aiInvestigationModel.countDocuments).toHaveBeenCalled();
+    expect(result.aiOverview).toBeDefined();
     expect(redisService.set).toHaveBeenCalledWith(
       CACHE_KEYS.DASHBOARD_OVERVIEW,
-      expect.objectContaining({ totalIncidents: 50 }),
+      expect.objectContaining({ totalIncidents: 50, aiOverview: expect.any(Object) }),
       CACHE_TTLS.DASHBOARD, // 30 seconds
     );
   });
 });
-
