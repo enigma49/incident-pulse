@@ -100,6 +100,10 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
         connection: connectionOptions,
       });
 
+      this.queue.on('error', (err) => {
+        this.logger.warn(`[BullMQ Queue] Connection warning: ${err.message}`);
+      });
+
       this.worker = new Worker(
         INVESTIGATION_QUEUE_NAME,
         async (job: Job) => {
@@ -110,6 +114,10 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
           concurrency: 2,
         },
       );
+
+      this.worker.on('error', (err) => {
+        this.logger.warn(`[BullMQ Worker] Connection warning: ${err.message}`);
+      });
 
       this.worker.on('failed', (job, err) => {
         this.logger.error(`[BullMQ Worker] Job ${job?.id} failed: ${err.message}`);
@@ -180,10 +188,18 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
             removeOnComplete: true,
           });
         } catch (queueErr: any) {
-          setImmediate(() => this.processInvestigationJob(jobPayload));
+          setImmediate(() => {
+            this.processInvestigationJob(jobPayload).catch((err) =>
+              this.logger.error(`[In-Process Worker] Execution error: ${err.message}`),
+            );
+          });
         }
       } else {
-        setImmediate(() => this.processInvestigationJob(jobPayload));
+        setImmediate(() => {
+          this.processInvestigationJob(jobPayload).catch((err) =>
+            this.logger.error(`[In-Process Worker] Execution error: ${err.message}`),
+          );
+        });
       }
 
       return {
@@ -227,11 +243,19 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
         });
       } catch (queueErr: any) {
         this.logger.warn(`[BullMQ] Failed to add to Redis queue (${queueErr.message}). Dispatching in-process.`);
-        setImmediate(() => this.processInvestigationJob(jobPayload));
+        setImmediate(() => {
+          this.processInvestigationJob(jobPayload).catch((err) =>
+            this.logger.error(`[In-Process Worker] Execution error: ${err.message}`),
+          );
+        });
       }
     } else {
       // Resilient in-process async dispatch
-      setImmediate(() => this.processInvestigationJob(jobPayload));
+      setImmediate(() => {
+        this.processInvestigationJob(jobPayload).catch((err) =>
+          this.logger.error(`[In-Process Worker] Execution error: ${err.message}`),
+        );
+      });
     }
 
     return {
@@ -385,25 +409,29 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
     } catch (err: any) {
       this.logger.error(`[AI Worker] Investigation ${investigationId} failed: ${err.message}`, err.stack);
 
-      investigation.status = AIInvestigationStatus.FAILED;
-      investigation.error = err.message;
-      investigation.progressEvents.push('failed');
-      await investigation.save();
+      try {
+        investigation.status = AIInvestigationStatus.FAILED;
+        investigation.error = err.message;
+        investigation.progressEvents.push('failed');
+        await investigation.save();
 
-      await this.auditService.logEvent({
-        incidentId: new Types.ObjectId(incidentId),
-        actorType: ActorType.AI,
-        actorId: 'ai-engine',
-        action: 'AI_INVESTIGATION_FAILED',
-        entity: 'AIInvestigation',
-        entityId: investigation._id.toString(),
-        metadata: { error: err.message },
-      });
+        await this.auditService.logEvent({
+          incidentId: new Types.ObjectId(incidentId),
+          actorType: ActorType.AI,
+          actorId: 'ai-engine',
+          action: 'AI_INVESTIGATION_FAILED',
+          entity: 'AIInvestigation',
+          entityId: investigation._id.toString(),
+          metadata: { error: err.message },
+        });
 
-      this.eventsGateway.emitAIInvestigationEvent(incidentId, 'failed', {
-        investigationId: investigation._id.toString(),
-        error: err.message,
-      });
+        this.eventsGateway.emitAIInvestigationEvent(incidentId, 'failed', {
+          investigationId: investigation._id.toString(),
+          error: err.message,
+        });
+      } catch (saveErr: any) {
+        this.logger.error(`[AI Worker] Failed to persist failed investigation status: ${saveErr.message}`);
+      }
     }
   }
 

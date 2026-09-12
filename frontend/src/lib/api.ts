@@ -123,6 +123,11 @@ export const api = {
   teams: {
     list: () => request<any[]>('/teams'),
     workload: () => request<any[]>('/teams/workload'),
+    create: (data: { name: string; description?: string; serviceResponsibility?: string[] }) =>
+      request<any>('/teams', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
   },
 
   users: {

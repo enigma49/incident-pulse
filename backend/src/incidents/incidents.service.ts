@@ -101,9 +101,15 @@ export class IncidentsService {
       filter.service = query.service;
     }
     if (query.teamId) {
+      if (!Types.ObjectId.isValid(query.teamId)) {
+        throw new BadRequestException(`Invalid teamId format: ${query.teamId}`);
+      }
       filter.teamId = new Types.ObjectId(query.teamId);
     }
     if (query.assigneeId) {
+      if (!Types.ObjectId.isValid(query.assigneeId)) {
+        throw new BadRequestException(`Invalid assigneeId format: ${query.assigneeId}`);
+      }
       filter.assigneeId = new Types.ObjectId(query.assigneeId);
     }
 
@@ -118,7 +124,8 @@ export class IncidentsService {
     }
 
     if (query.search && query.search.trim()) {
-      const searchRegex = new RegExp(query.search.trim(), 'i');
+      const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const searchRegex = new RegExp(escaped, 'i');
       filter.$or = [
         { title: searchRegex },
         { description: searchRegex },
@@ -218,6 +225,17 @@ export class IncidentsService {
   }
 
   async update(id: string, dto: UpdateIncidentDto, currentUser: any): Promise<IncidentDocument> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException(`Invalid incident ID format: ${id}`);
+    }
+
+    if (dto.teamId && !Types.ObjectId.isValid(dto.teamId)) {
+      throw new BadRequestException(`Invalid teamId format: ${dto.teamId}`);
+    }
+    if (dto.assigneeId && !Types.ObjectId.isValid(dto.assigneeId)) {
+      throw new BadRequestException(`Invalid assigneeId format: ${dto.assigneeId}`);
+    }
+
     const existing = await this.incidentModel.findById(id);
     if (!existing) {
       throw new NotFoundException(`Incident ${id} not found`);
@@ -279,6 +297,10 @@ export class IncidentsService {
     newStatus: IncidentStatus,
     currentUser: any,
   ): Promise<IncidentDocument> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException(`Invalid incident ID format: ${id}`);
+    }
+
     const existing = await this.incidentModel.findById(id);
     if (!existing) {
       throw new NotFoundException(`Incident ${id} not found`);
@@ -322,6 +344,10 @@ export class IncidentsService {
     newSeverity: IncidentSeverity,
     currentUser: any,
   ): Promise<IncidentDocument> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException(`Invalid incident ID format: ${id}`);
+    }
+
     const existing = await this.incidentModel.findById(id);
     if (!existing) {
       throw new NotFoundException(`Incident ${id} not found`);
@@ -359,6 +385,17 @@ export class IncidentsService {
     dto: AssignIncidentDto,
     currentUser: any,
   ): Promise<IncidentDocument> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException(`Invalid incident ID format: ${id}`);
+    }
+
+    if (dto.teamId && !Types.ObjectId.isValid(dto.teamId)) {
+      throw new BadRequestException(`Invalid teamId format: ${dto.teamId}`);
+    }
+    if (dto.assigneeId && !Types.ObjectId.isValid(dto.assigneeId)) {
+      throw new BadRequestException(`Invalid assigneeId format: ${dto.assigneeId}`);
+    }
+
     const existing = await this.incidentModel.findById(id);
     if (!existing) {
       throw new NotFoundException(`Incident ${id} not found`);

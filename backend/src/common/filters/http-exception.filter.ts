@@ -17,7 +17,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
 
-    const status =
+    let status =
       exception instanceof HttpException
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
@@ -33,6 +33,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
         message = (res as any).message || res;
         error = (res as any).error || error;
       }
+    } else if (exception && typeof exception === 'object' && (exception as any).name === 'CastError') {
+      status = HttpStatus.BAD_REQUEST;
+      error = 'Bad Request';
+      message = `Invalid format for field ${(exception as any).path || 'id'}`;
+    } else if (exception && typeof exception === 'object' && (exception as any).name === 'ValidationError') {
+      status = HttpStatus.BAD_REQUEST;
+      error = 'Bad Request';
+      message = (exception as any).message;
+    } else if (exception && typeof exception === 'object' && (exception as any).code === 11000) {
+      status = HttpStatus.CONFLICT;
+      error = 'Conflict';
+      message = 'A resource with this key already exists';
     } else if (exception instanceof Error) {
       this.logger.error(
         `Unhandled exception on ${request.method} ${request.url}: ${exception.message}`,

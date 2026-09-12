@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Task, TaskDocument, TaskStatus } from './schemas/task.schema';
@@ -26,6 +26,13 @@ export class TasksService {
     dto: CreateTaskDto,
     currentUser: any,
   ): Promise<TaskDocument> {
+    if (!Types.ObjectId.isValid(incidentId)) {
+      throw new BadRequestException(`Invalid incident ID format: ${incidentId}`);
+    }
+    if (dto.assigneeId && !Types.ObjectId.isValid(dto.assigneeId)) {
+      throw new BadRequestException(`Invalid assigneeId format: ${dto.assigneeId}`);
+    }
+
     const incident = await this.incidentModel.findById(incidentId);
     if (!incident) {
       throw new NotFoundException(`Incident ${incidentId} not found`);
@@ -63,6 +70,10 @@ export class TasksService {
   }
 
   async findByIncident(incidentId: string): Promise<TaskDocument[]> {
+    if (!Types.ObjectId.isValid(incidentId)) {
+      throw new BadRequestException(`Invalid incident ID format: ${incidentId}`);
+    }
+
     return this.taskModel
       .find({ incidentId: new Types.ObjectId(incidentId) })
       .populate('assigneeId', 'name email role')
@@ -75,6 +86,13 @@ export class TasksService {
     dto: UpdateTaskDto,
     currentUser: any,
   ): Promise<TaskDocument> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException(`Invalid task ID format: ${id}`);
+    }
+    if (dto.assigneeId && !Types.ObjectId.isValid(dto.assigneeId)) {
+      throw new BadRequestException(`Invalid assigneeId format: ${dto.assigneeId}`);
+    }
+
     const existing = await this.taskModel.findById(id);
     if (!existing) {
       throw new NotFoundException(`Task ${id} not found`);
@@ -111,6 +129,10 @@ export class TasksService {
   }
 
   async delete(id: string, currentUser: any): Promise<void> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException(`Invalid task ID format: ${id}`);
+    }
+
     const existing = await this.taskModel.findById(id);
     if (!existing) {
       throw new NotFoundException(`Task ${id} not found`);

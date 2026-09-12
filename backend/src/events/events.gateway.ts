@@ -36,8 +36,11 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('join:incident')
   handleJoinIncident(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { incidentId: string },
+    @MessageBody() data?: { incidentId?: string },
   ) {
+    if (!data?.incidentId) {
+      return { event: 'error', message: 'incidentId is required' };
+    }
     const room = `incident:${data.incidentId}`;
     client.join(room);
     this.logger.debug(`[Socket.IO] Socket ${client.id} joined room: ${room}`);
@@ -47,8 +50,11 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('leave:incident')
   handleLeaveIncident(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { incidentId: string },
+    @MessageBody() data?: { incidentId?: string },
   ) {
+    if (!data?.incidentId) {
+      return { event: 'error', message: 'incidentId is required' };
+    }
     const room = `incident:${data.incidentId}`;
     client.leave(room);
     this.logger.debug(`[Socket.IO] Socket ${client.id} left room: ${room}`);

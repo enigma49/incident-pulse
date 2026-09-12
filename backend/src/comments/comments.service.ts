@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Comment, CommentDocument } from './schemas/comment.schema';
@@ -26,6 +26,10 @@ export class CommentsService {
     dto: CreateCommentDto,
     currentUser: any,
   ): Promise<CommentDocument> {
+    if (!Types.ObjectId.isValid(incidentId)) {
+      throw new BadRequestException(`Invalid incident ID format: ${incidentId}`);
+    }
+
     const incident = await this.incidentModel.findById(incidentId);
     if (!incident) {
       throw new NotFoundException(`Incident ${incidentId} not found`);
@@ -61,6 +65,10 @@ export class CommentsService {
   }
 
   async findByIncident(incidentId: string): Promise<CommentDocument[]> {
+    if (!Types.ObjectId.isValid(incidentId)) {
+      throw new BadRequestException(`Invalid incident ID format: ${incidentId}`);
+    }
+
     return this.commentModel
       .find({ incidentId: new Types.ObjectId(incidentId) })
       .populate('userId', 'name email role')

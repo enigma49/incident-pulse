@@ -66,22 +66,10 @@ export default function TeamsAndUsersPage() {
         .map((s) => s.trim())
         .filter(Boolean);
 
-      await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"}/teams`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
-        },
-        body: JSON.stringify({
-          name: teamName,
-          description: teamDesc,
-          serviceResponsibility: services,
-        }),
-      }).then(async (res) => {
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.message || "Failed to create team");
-        }
+      await api.teams.create({
+        name: teamName,
+        description: teamDesc,
+        serviceResponsibility: services,
       });
 
       setIsModalOpen(false);

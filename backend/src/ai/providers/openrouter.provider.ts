@@ -182,8 +182,17 @@ CRITICAL GROUNDING & SAFETY RULES:
           throw new Error('Malformed OpenRouter response: missing choices[0].message.content');
         }
 
+        // Sanitize markdown fences if model wrapped JSON in ```json ... ```
+        let cleanChoice = choice.trim();
+        if (cleanChoice.startsWith('```')) {
+          cleanChoice = cleanChoice
+            .replace(/^```(?:json)?\s*/i, '')
+            .replace(/\s*```$/, '')
+            .trim();
+        }
+
         // Parse JSON content
-        const parsed = JSON.parse(choice);
+        const parsed = JSON.parse(cleanChoice);
         const validated: AIOutputValidated = AIOutputZodSchema.parse(parsed);
 
         const latencyMs = Date.now() - startTime;
