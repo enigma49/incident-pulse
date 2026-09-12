@@ -10,22 +10,54 @@ export class OpenRouterProvider implements AIProvider {
   readonly name = 'openrouter';
   private readonly logger = new Logger(OpenRouterProvider.name);
 
-  private readonly apiKey: string;
-  private readonly baseUrl: string;
-  private readonly model: string;
+  private apiKey: string;
+  private baseUrl: string;
+  private model: string;
   private readonly maxRetries = 2;
 
   constructor(
     private configService: ConfigService,
     private mockFallback: MockAIProvider,
   ) {
-    this.apiKey = this.configService.get<string>('OPENROUTER_API_KEY') || '';
+    this.apiKey =
+      this.configService.get<string>('OPENROUTER_API_KEY') ||
+      process.env.OPENROUTER_API_KEY ||
+      '';
     this.baseUrl =
       this.configService.get<string>('OPENROUTER_BASE_URL') ||
+      process.env.OPENROUTER_BASE_URL ||
       'https://openrouter.ai/api/v1';
     this.model =
       this.configService.get<string>('OPENROUTER_MODEL') ||
-      'anthropic/claude-3.5-sonnet';
+      process.env.OPENROUTER_MODEL ||
+      'openai/gpt-4o-mini';
+  }
+
+  private getApiKey(): string {
+    return (
+      this.configService.get<string>('OPENROUTER_API_KEY') ||
+      process.env.OPENROUTER_API_KEY ||
+      this.apiKey ||
+      ''
+    );
+  }
+
+  private getBaseUrl(): string {
+    return (
+      this.configService.get<string>('OPENROUTER_BASE_URL') ||
+      process.env.OPENROUTER_BASE_URL ||
+      this.baseUrl ||
+      'https://openrouter.ai/api/v1'
+    );
+  }
+
+  private getModel(): string {
+    return (
+      this.configService.get<string>('OPENROUTER_MODEL') ||
+      process.env.OPENROUTER_MODEL ||
+      this.model ||
+      'openai/gpt-4o-mini'
+    );
   }
 
   public buildSystemPrompt(): string {
@@ -71,17 +103,20 @@ CRITICAL GROUNDING & SAFETY RULES:
 
   async investigate(context: GroundedContext): Promise<AIProviderResponse> {
     const startTime = Date.now();
+    const apiKey = this.getApiKey();
+    const baseUrl = this.getBaseUrl();
+    const model = this.getModel();
 
     // If no API key is set, immediately fallback cleanly to Mock provider
-    if (!this.apiKey || this.apiKey === 'your_openrouter_api_key_here') {
+    if (!apiKey || apiKey === 'your_openrouter_api_key_here') {
       this.logger.warn(
-        '[OpenRouterProvider] OPENROUTER_API_KEY is not configured. Falling back to deterministic MockAIProvider.',
+        '[OpenRouterProvider] OPENROUTER_API_KEY is not configured in .env file or environment. Falling back to deterministic MockAIProvider.',
       );
       return this.mockFallback.investigate(context);
     }
 
     const payload = {
-      model: this.model,
+      model,
       messages: [
         { role: 'system', content: this.buildSystemPrompt() },
         {
@@ -108,17 +143,17 @@ CRITICAL GROUNDING & SAFETY RULES:
       try {
         attempt++;
         this.logger.log(
-          `[OpenRouterProvider] Calling OpenRouter API (Attempt ${attempt}/${this.maxRetries + 1}, Model: ${this.model})`,
+          `[OpenRouterProvider] Calling OpenRouter API (Attempt ${attempt}/${this.maxRetries + 1}, Model: ${model})`,
         );
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 18000); // 18s timeout
 
-        const response = await fetch(`${this.baseUrl}/chat/completions`, {
+        const response = await fetch(`${baseUrl}/chat/completions`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${this.apiKey}`,
+            Authorization: `Bearer ${apiKey}`,
             'HTTP-Referer': 'https://incidentpulse.local',
             'X-Title': 'IncidentPulse Operations Platform',
           },
@@ -158,7 +193,7 @@ CRITICAL GROUNDING & SAFETY RULES:
           result: validated,
           metadata: {
             provider: 'openrouter',
-            model: this.model,
+            model,
             latencyMs,
             tokenUsage: {
               promptTokens: usage.prompt_tokens || 0,
