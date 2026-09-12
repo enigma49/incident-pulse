@@ -5,7 +5,7 @@ export type TeamDocument = Team & Document;
 
 @Schema({ timestamps: true })
 export class Team {
-  @Prop({ required: true, unique: true, trim: true, index: true })
+  @Prop({ required: true, unique: true, trim: true })
   name: string;
 
   @Prop({ default: '' })
@@ -22,6 +22,5 @@ export class Team {
 }
 
 export const TeamSchema = SchemaFactory.createForClass(Team);
-TeamSchema.index({ name: 1 }, { unique: true });
 TeamSchema.index({ serviceResponsibility: 1 });
 

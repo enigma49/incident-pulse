@@ -7,6 +7,7 @@ import { Comment } from '../comments/schemas/comment.schema';
 import { Task } from '../tasks/schemas/task.schema';
 import { AIInvestigation } from '../ai/schemas/ai-investigation.schema';
 import { AuditService } from '../audit/audit.service';
+import { RedisService } from '../common/redis/redis.service';
 import { Types } from 'mongoose';
 
 describe('IncidentsService', () => {
@@ -122,6 +123,15 @@ describe('IncidentsService', () => {
         { provide: getModelToken(Task.name), useValue: taskModel },
         { provide: getModelToken(AIInvestigation.name), useValue: aiInvestigationModel },
         { provide: AuditService, useValue: auditService },
+        {
+          provide: RedisService,
+          useValue: {
+            get: jest.fn().mockResolvedValue(null),
+            set: jest.fn().mockResolvedValue(undefined),
+            invalidateIncident: jest.fn().mockResolvedValue(undefined),
+            invalidateDashboard: jest.fn().mockResolvedValue(undefined),
+          },
+        },
       ],
     }).compile();
 

@@ -6,6 +6,7 @@ import { Incident, IncidentDocument } from '../incidents/schemas/incident.schema
 import { AuditService } from '../audit/audit.service';
 import { ActorType } from '../audit/schemas/audit-event.schema';
 import { CreateTaskDto, UpdateTaskDto } from './dto/task.dto';
+import { RedisService } from '../common/redis/redis.service';
 
 @Injectable()
 export class TasksService {
@@ -15,6 +16,7 @@ export class TasksService {
     @InjectModel(Task.name) private taskModel: Model<TaskDocument>,
     @InjectModel(Incident.name) private incidentModel: Model<IncidentDocument>,
     private auditService: AuditService,
+    private redisService: RedisService,
   ) {}
 
   async create(
@@ -46,6 +48,9 @@ export class TasksService {
       entityId: saved._id.toString(),
       metadata: { title: saved.title, status: saved.status },
     });
+
+    // Invalidate incident cache
+    await this.redisService.invalidateIncident(incidentId);
 
     return saved.populate('assigneeId', 'name email role');
   }
@@ -87,6 +92,9 @@ export class TasksService {
       metadata: { status: saved.status, title: saved.title },
     });
 
+    // Invalidate incident cache
+    await this.redisService.invalidateIncident(saved.incidentId.toString());
+
     return saved.populate('assigneeId', 'name email role');
   }
 
@@ -96,6 +104,7 @@ export class TasksService {
       throw new NotFoundException(`Task ${id} not found`);
     }
 
+    const incidentId = existing.incidentId.toString();
     await this.taskModel.findByIdAndDelete(id);
 
     await this.auditService.logEvent({
@@ -107,6 +116,8 @@ export class TasksService {
       entityId: id,
       metadata: { title: existing.title },
     });
+
+    // Invalidate incident cache
+    await this.redisService.invalidateIncident(incidentId);
   }
 }
-

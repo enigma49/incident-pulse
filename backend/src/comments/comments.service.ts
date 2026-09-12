@@ -6,6 +6,7 @@ import { Incident, IncidentDocument } from '../incidents/schemas/incident.schema
 import { AuditService } from '../audit/audit.service';
 import { ActorType } from '../audit/schemas/audit-event.schema';
 import { CreateCommentDto } from './dto/comment.dto';
+import { RedisService } from '../common/redis/redis.service';
 
 @Injectable()
 export class CommentsService {
@@ -15,6 +16,7 @@ export class CommentsService {
     @InjectModel(Comment.name) private commentModel: Model<CommentDocument>,
     @InjectModel(Incident.name) private incidentModel: Model<IncidentDocument>,
     private auditService: AuditService,
+    private redisService: RedisService,
   ) {}
 
   async create(
@@ -44,6 +46,9 @@ export class CommentsService {
       entityId: saved._id.toString(),
       metadata: { commentSnippet: dto.content.slice(0, 100) },
     });
+
+    // Invalidate incident detail cache
+    await this.redisService.invalidateIncident(incidentId);
 
     return saved.populate('userId', 'name email role');
   }

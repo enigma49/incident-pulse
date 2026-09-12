@@ -91,3 +91,23 @@ npm run dev
 5. **Real-time Collaboration**: Socket.IO incident and dashboard rooms with automatic client reconnect reconciliation.
 6. **AI Investigation Workflow**: BullMQ asynchronous processing, grounded context gathering via controlled tools, Zod-validated findings, and human-in-the-loop approval.
 
+---
+
+## Redis Caching Architecture
+
+The platform incorporates tiered Redis caching for read-heavy operations with strict cache invalidation on any state-changing mutation:
+
+### Cached Use Cases
+| Resource | Cache Key | TTL | Description | Invalidation Triggers |
+|----------|-----------|-----|-------------|-----------------------|
+| **Operations Overview** | `dashboard:overview` | 30 seconds | Aggregated counts of open, critical, and mitigated incidents, severity distributions, and team workloads | Any incident creation, status change, severity change, or team assignment |
+| **Incident Detail** | `incident:{incidentId}:detail` | 15 seconds | Composite incident document with correlated alerts, tasks, comments, and recent audit timeline | Incident status/severity updates, assignment, comment creation, task creation/toggle/deletion |
+
+### Invalidation Strategy
+- **Targeted Purging**: Mutations invoke `redisService.invalidateIncident(id)` which immediately evicts the incident's cached detail key and the global dashboard overview key.
+- **Fail-soft Fallback Mode**: If Redis becomes temporarily unreachable or fails:
+  1. The error is intercepted and logged (`[Redis] Connection warning: Gracefully falling back...`).
+  2. The application falls back seamlessly to an in-memory TTL store backed by direct MongoDB queries.
+  3. The core application remains 100% operational with zero downtime or uncaught process crashes.
+
+

@@ -29,7 +29,6 @@ export class Incident {
     required: true,
     enum: IncidentStatus,
     default: IncidentStatus.OPEN,
-    index: true,
   })
   status: IncidentStatus;
 
@@ -37,17 +36,16 @@ export class Incident {
     required: true,
     enum: IncidentSeverity,
     default: IncidentSeverity.P3,
-    index: true,
   })
   severity: IncidentSeverity;
 
-  @Prop({ required: true, trim: true, index: true })
+  @Prop({ required: true, trim: true })
   service: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'Team', default: null, index: true })
+  @Prop({ type: Types.ObjectId, ref: 'Team', default: null })
   teamId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', default: null, index: true })
+  @Prop({ type: Types.ObjectId, ref: 'User', default: null })
   assigneeId?: Types.ObjectId;
 
   @Prop({ type: [String], default: [] })

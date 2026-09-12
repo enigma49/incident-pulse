@@ -27,6 +27,7 @@ import {
   AssignIncidentDto,
 } from './dto/incident.dto';
 import { QueryIncidentsDto } from './dto/query-incidents.dto';
+import { RedisService, CACHE_KEYS, CACHE_TTLS } from '../common/redis/redis.service';
 
 @Injectable()
 export class IncidentsService {
@@ -40,6 +41,7 @@ export class IncidentsService {
     @InjectModel(AIInvestigation.name)
     private aiInvestigationModel: Model<AIInvestigationDocument>,
     private auditService: AuditService,
+    private redisService: RedisService,
   ) {}
 
   async create(dto: CreateIncidentDto, currentUser: any): Promise<IncidentDocument> {
@@ -70,6 +72,9 @@ export class IncidentsService {
         status: saved.status,
       },
     });
+
+    // Invalidate cached operations dashboard
+    await this.redisService.invalidateDashboard();
 
     return saved;
   }
@@ -147,6 +152,21 @@ export class IncidentsService {
       throw new BadRequestException(`Invalid incident ID format: ${id}`);
     }
 
+    const cacheKey = CACHE_KEYS.incidentDetail(id);
+
+    // 1. Check Redis Cache
+    const cached = await this.redisService.get<any>(cacheKey);
+    if (cached) {
+      this.logger.log(`Serving incident detail from Redis cache [${cacheKey}]`);
+      return {
+        ...cached,
+        fromCache: true,
+      };
+    }
+
+    this.logger.log(`Cache miss on [${cacheKey}]. Querying MongoDB...`);
+
+    // 2. Fetch from MongoDB
     const incident = await this.incidentModel
       .findById(id)
       .populate('teamId', 'name serviceResponsibility')
@@ -176,14 +196,20 @@ export class IncidentsService {
         .exec(),
     ]);
 
-    return {
+    const result = {
       incident,
       alerts,
       tasks,
       comments,
       auditEvents,
       aiInvestigation,
+      fromCache: false,
     };
+
+    // 3. Cache in Redis (TTL: 15 seconds)
+    await this.redisService.set(cacheKey, result, CACHE_TTLS.INCIDENT_DETAIL);
+
+    return result;
   }
 
   async update(id: string, dto: UpdateIncidentDto, currentUser: any): Promise<IncidentDocument> {
@@ -234,6 +260,9 @@ export class IncidentsService {
       metadata: { updates },
     });
 
+    // Invalidate incident detail and dashboard caches
+    await this.redisService.invalidateIncident(id);
+
     return updated;
   }
 
@@ -271,6 +300,9 @@ export class IncidentsService {
       metadata: { oldStatus, newStatus },
     });
 
+    // Invalidate caches
+    await this.redisService.invalidateIncident(id);
+
     return saved;
   }
 
@@ -301,6 +333,9 @@ export class IncidentsService {
       entityId: saved._id.toString(),
       metadata: { oldSeverity, newSeverity },
     });
+
+    // Invalidate caches
+    await this.redisService.invalidateIncident(id);
 
     return saved;
   }
@@ -334,6 +369,9 @@ export class IncidentsService {
       metadata: { assigneeId: dto.assigneeId, teamId: dto.teamId },
     });
 
+    // Invalidate caches
+    await this.redisService.invalidateIncident(id);
+
     return saved.populate([
       { path: 'teamId', select: 'name serviceResponsibility' },
       { path: 'assigneeId', select: 'name email role' },
@@ -344,4 +382,3 @@ export class IncidentsService {
     return this.changeStatus(id, IncidentStatus.RESOLVED, currentUser);
   }
 }
-

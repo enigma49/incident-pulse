@@ -2,6 +2,16 @@ import { Injectable, OnModuleDestroy, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 
+export const CACHE_KEYS = {
+  DASHBOARD_OVERVIEW: 'dashboard:overview',
+  incidentDetail: (id: string) => `incident:${id}:detail`,
+};
+
+export const CACHE_TTLS = {
+  DASHBOARD: 30, // 30 seconds
+  INCIDENT_DETAIL: 15, // 15 seconds
+};
+
 @Injectable()
 export class RedisService implements OnModuleDestroy {
   private readonly logger = new Logger(RedisService.name);
@@ -33,7 +43,7 @@ export class RedisService implements OnModuleDestroy {
 
       this.client.on('connect', () => {
         this.isConnected = true;
-        this.logger.log(`Redis connected successfully at ${host}:${port}`);
+        this.logger.log(`[Redis] Connected successfully at ${host}:${port}`);
       });
 
       this.client.on('ready', () => {
@@ -42,7 +52,7 @@ export class RedisService implements OnModuleDestroy {
 
       this.client.on('error', (err) => {
         this.isConnected = false;
-        this.logger.warn(`Redis connection warning: ${err.message}. Gracefully falling back to memory/MongoDB.`);
+        this.logger.warn(`[Redis] Connection warning: ${err.message}. Gracefully falling back to memory/MongoDB.`);
       });
 
       this.client.on('close', () => {
@@ -52,11 +62,11 @@ export class RedisService implements OnModuleDestroy {
       // Attempt non-blocking connection
       this.client.connect().catch((err) => {
         this.isConnected = false;
-        this.logger.warn(`Redis initial connect failed: ${err.message}. Operating in fallback mode.`);
+        this.logger.warn(`[Redis] Initial connect failed: ${err.message}. Operating in fallback mode.`);
       });
     } catch (err: any) {
       this.isConnected = false;
-      this.logger.warn(`Redis initialization skipped: ${err.message}. Using in-memory fallback.`);
+      this.logger.warn(`[Redis] Initialization skipped: ${err.message}. Using in-memory fallback.`);
     }
   }
 
@@ -64,21 +74,30 @@ export class RedisService implements OnModuleDestroy {
     if (this.isConnected && this.client) {
       try {
         const raw = await this.client.get(key);
-        if (!raw) return null;
+        if (!raw) {
+          this.logger.debug(`[Cache MISS] Key: ${key}`);
+          return null;
+        }
+        this.logger.debug(`[Cache HIT] Key: ${key} (Redis)`);
         return JSON.parse(raw) as T;
       } catch (err: any) {
-        this.logger.warn(`Redis GET error for key [${key}]: ${err.message}`);
+        this.logger.warn(`[Redis] GET error for key [${key}]: ${err.message}. Falling back.`);
       }
     }
 
     // Memory fallback
     const entry = this.memoryFallback.get(key);
-    if (!entry) return null;
+    if (!entry) {
+      this.logger.debug(`[Cache MISS] Key: ${key} (Memory Fallback)`);
+      return null;
+    }
     if (Date.now() > entry.expiresAt) {
       this.memoryFallback.delete(key);
+      this.logger.debug(`[Cache EXPIRED] Key: ${key} (Memory Fallback)`);
       return null;
     }
     try {
+      this.logger.debug(`[Cache HIT] Key: ${key} (Memory Fallback)`);
       return JSON.parse(entry.value) as T;
     } catch {
       return null;
@@ -95,15 +114,17 @@ export class RedisService implements OnModuleDestroy {
         } else {
           await this.client.set(key, serialized);
         }
+        this.logger.debug(`[Cache SET] Key: ${key} (TTL: ${ttlSeconds || 'infinite'}s)`);
         return;
       } catch (err: any) {
-        this.logger.warn(`Redis SET error for key [${key}]: ${err.message}`);
+        this.logger.warn(`[Redis] SET error for key [${key}]: ${err.message}. Saving to fallback.`);
       }
     }
 
     // Memory fallback with TTL
     const expiresAt = ttlSeconds ? Date.now() + ttlSeconds * 1000 : Date.now() + 86400 * 1000;
     this.memoryFallback.set(key, { value: serialized, expiresAt });
+    this.logger.debug(`[Cache SET] Key: ${key} (Memory Fallback, TTL: ${ttlSeconds || 'infinite'}s)`);
   }
 
   async del(key: string): Promise<void> {
@@ -111,10 +132,11 @@ export class RedisService implements OnModuleDestroy {
       try {
         await this.client.del(key);
       } catch (err: any) {
-        this.logger.warn(`Redis DEL error for key [${key}]: ${err.message}`);
+        this.logger.warn(`[Redis] DEL error for key [${key}]: ${err.message}`);
       }
     }
     this.memoryFallback.delete(key);
+    this.logger.debug(`[Cache INVALIDATED] Key: ${key}`);
   }
 
   async delPattern(pattern: string): Promise<void> {
@@ -123,9 +145,10 @@ export class RedisService implements OnModuleDestroy {
         const keys = await this.client.keys(pattern);
         if (keys.length > 0) {
           await this.client.del(...keys);
+          this.logger.debug(`[Cache INVALIDATED] Pattern: ${pattern} (${keys.length} keys)`);
         }
       } catch (err: any) {
-        this.logger.warn(`Redis delPattern error for pattern [${pattern}]: ${err.message}`);
+        this.logger.warn(`[Redis] delPattern error for pattern [${pattern}]: ${err.message}`);
       }
     }
 
@@ -136,6 +159,23 @@ export class RedisService implements OnModuleDestroy {
         this.memoryFallback.delete(key);
       }
     }
+  }
+
+  /**
+   * High-level helper: Invalidate incident detail and overall operations dashboard
+   */
+  async invalidateIncident(incidentId: string): Promise<void> {
+    await Promise.all([
+      this.del(CACHE_KEYS.incidentDetail(incidentId)),
+      this.del(CACHE_KEYS.DASHBOARD_OVERVIEW),
+    ]);
+  }
+
+  /**
+   * High-level helper: Invalidate operations dashboard
+   */
+  async invalidateDashboard(): Promise<void> {
+    await this.del(CACHE_KEYS.DASHBOARD_OVERVIEW);
   }
 
   isHealthy(): boolean {
@@ -156,4 +196,3 @@ export class RedisService implements OnModuleDestroy {
     }
   }
 }
-

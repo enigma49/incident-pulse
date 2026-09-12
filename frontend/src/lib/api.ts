@@ -141,6 +141,10 @@ export const api = {
     getByIncident: (incidentId: string) => request<any[]>(`/alerts/incident/${incidentId}`),
   },
 
+  dashboard: {
+    overview: () => request<any>('/dashboard/overview'),
+  },
+
   health: () => request<any>('/health'),
 };
 
