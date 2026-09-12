@@ -172,6 +172,26 @@ export const api = {
       request<any>(`/incidents/${incidentId}/investigation`),
     getHistory: (incidentId: string) =>
       request<any[]>(`/incidents/${incidentId}/investigations`),
+    approveAction: (incidentId: string, investigationId?: string, force?: boolean) =>
+      request<any>(
+        investigationId
+          ? `/incidents/${incidentId}/investigations/${investigationId}/actions/approve`
+          : `/incidents/${incidentId}/investigation/actions/approve`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ force }),
+        },
+      ),
+    rejectAction: (incidentId: string, investigationId?: string, reason?: string) =>
+      request<any>(
+        investigationId
+          ? `/incidents/${incidentId}/investigations/${investigationId}/actions/reject`
+          : `/incidents/${incidentId}/investigation/actions/reject`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ reason }),
+        },
+      ),
   },
 
   health: () => request<any>('/health'),

@@ -36,6 +36,9 @@ import {
   ChevronDown,
   Layers,
   Radio,
+  ShieldAlert,
+  Check,
+  XCircle,
 } from "lucide-react";
 import { useSocket } from "../../../context/SocketContext";
 
@@ -65,6 +68,13 @@ export default function IncidentDetailPage() {
   const [isPostingComment, setIsPostingComment] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [isCreatingTask, setIsCreatingTask] = useState(false);
+
+  // Phase 7: Action approval & rejection states
+  const [isApprovingAction, setIsApprovingAction] = useState(false);
+  const [isRejectingAction, setIsRejectingAction] = useState(false);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const fetchIncidentDetail = useCallback(async () => {
     if (!id) return;
@@ -223,7 +233,11 @@ export default function IncidentDetailPage() {
           status: "RUNNING",
           summary: aiEvent.data?.step || prev?.summary || "Investigating incident telemetry...",
         }));
-      } else if (aiEvent.type === "completed") {
+      } else if (
+        aiEvent.type === "completed" ||
+        aiEvent.type === "action_executed" ||
+        aiEvent.type === "action_rejected"
+      ) {
         fetchIncidentDetail();
       } else if (aiEvent.type === "failed") {
         setAiInvestigation((prev) => ({
@@ -273,6 +287,40 @@ export default function IncidentDetailPage() {
       setError(err.message || "Failed to trigger AI investigation");
     } finally {
       setIsTriggeringAI(false);
+    }
+  };
+
+  // Phase 7: Approve & Execute Action
+  const handleApproveAction = async (force = false) => {
+    if (!id || !aiInvestigation?._id) return;
+    setIsApprovingAction(true);
+    setActionError(null);
+    try {
+      const res = await api.ai.approveAction(id, aiInvestigation._id, force);
+      showNotification(`Action approved & executed: ${res.action?.type || "Success"}`);
+      await fetchIncidentDetail();
+    } catch (err: any) {
+      setActionError(err.message || "Failed to approve and execute action");
+    } finally {
+      setIsApprovingAction(false);
+    }
+  };
+
+  // Phase 7: Reject Proposed Action
+  const handleRejectAction = async () => {
+    if (!id || !aiInvestigation?._id) return;
+    setIsRejectingAction(true);
+    setActionError(null);
+    try {
+      await api.ai.rejectAction(id, aiInvestigation._id, rejectReason);
+      showNotification("Proposed action was rejected");
+      setShowRejectModal(false);
+      setRejectReason("");
+      await fetchIncidentDetail();
+    } catch (err: any) {
+      setActionError(err.message || "Failed to reject action");
+    } finally {
+      setIsRejectingAction(false);
     }
   };
 
@@ -1028,33 +1076,142 @@ export default function IncidentDetailPage() {
                   </div>
                 )}
 
-                {/* Proposed Mitigation Action (Human Safety Boundary) */}
+                {/* Proposed Mitigation Action (Phase 7 Human Approval & Controlled Execution) */}
                 {aiInvestigation.proposedAction ? (
-                  <div className="p-3 bg-purple-950/40 border border-purple-800/90 rounded-xl space-y-2">
+                  <div className="p-3.5 bg-purple-950/40 border border-purple-800/90 rounded-xl space-y-3">
                     <div className="flex items-center justify-between">
-                      <span className="font-bold text-purple-300 text-xs">Proposed Mitigation Action</span>
-                      <span className="px-2 py-0.5 rounded bg-purple-900 text-purple-200 text-[10px] font-mono border border-purple-700">
+                      <div className="flex items-center gap-1.5">
+                        <ShieldAlert className="h-4 w-4 text-purple-400 shrink-0" />
+                        <span className="font-bold text-purple-200 text-xs">Proposed Mitigation Action</span>
+                      </div>
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
+                          aiInvestigation.proposedAction.status === 'EXECUTED'
+                            ? 'bg-emerald-950 border-emerald-700 text-emerald-300'
+                            : aiInvestigation.proposedAction.status === 'REJECTED'
+                            ? 'bg-rose-950 border-rose-700 text-rose-300'
+                            : 'bg-purple-900 border-purple-700 text-purple-200'
+                        }`}
+                      >
                         {aiInvestigation.proposedAction.status}
                       </span>
                     </div>
 
-                    <p className="text-slate-300 text-[11px] font-medium">
+                    <p className="text-slate-200 text-xs font-medium leading-relaxed">
                       {aiInvestigation.proposedAction.description || aiInvestigation.proposedAction.reason}
                     </p>
 
-                    <div className="p-2 rounded bg-slate-950 border border-purple-900/40 text-[10px] font-mono text-purple-200 space-y-1">
-                      <div>Action Type: {aiInvestigation.proposedAction.type}</div>
+                    <div className="p-2.5 rounded bg-slate-950 border border-purple-900/40 text-xs font-mono space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-400 text-[11px]">Action Type:</span>
+                        <span className="px-1.5 py-0.5 rounded bg-purple-950 border border-purple-800 text-purple-300 font-bold text-[11px]">
+                          {aiInvestigation.proposedAction.type}
+                        </span>
+                      </div>
                       {aiInvestigation.proposedAction.parameters && (
-                        <div>
-                          Params: {JSON.stringify(aiInvestigation.proposedAction.parameters)}
+                        <div className="text-[11px] text-slate-400">
+                          <span className="text-slate-500">Parameters: </span>
+                          <span className="text-purple-200">
+                            {JSON.stringify(aiInvestigation.proposedAction.parameters)}
+                          </span>
+                        </div>
+                      )}
+                      {aiInvestigation.proposedAction.reason && (
+                        <div className="text-[11px] text-slate-300">
+                          <span className="text-purple-400 font-semibold">Rationale: </span>
+                          {aiInvestigation.proposedAction.reason}
                         </div>
                       )}
                     </div>
 
-                    <div className="p-2 rounded bg-amber-950/40 border border-amber-800/70 text-[10px] text-amber-300 flex items-center gap-1.5">
-                      <AlertTriangle className="h-3.5 w-3.5 text-amber-400 shrink-0" />
-                      <span>Human Safety Gate: Autonomous execution blocked. Formal review & execution activates in Phase 7.</span>
-                    </div>
+                    {/* Action Review Outcomes if already reviewed */}
+                    {aiInvestigation.proposedAction.status === 'EXECUTED' && (
+                      <div className="p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-800/80 text-xs text-emerald-300 space-y-1">
+                        <div className="flex items-center gap-1.5 font-semibold">
+                          <CheckCircle className="h-3.5 w-3.5 text-emerald-400" />
+                          <span>Action Approved & Executed</span>
+                        </div>
+                        <p className="text-[11px] text-slate-300">
+                          Approved by <span className="font-mono text-emerald-200">{aiInvestigation.proposedAction.reviewedBy || 'Operator'}</span>
+                          {aiInvestigation.proposedAction.reviewedAt && ` at ${new Date(aiInvestigation.proposedAction.reviewedAt).toLocaleTimeString()}`}.
+                        </p>
+                        {aiInvestigation.proposedAction.executionResult && (
+                          <div className="text-[10px] font-mono text-emerald-400 bg-slate-950/60 p-1.5 rounded mt-1">
+                            Execution Result: {JSON.stringify(aiInvestigation.proposedAction.executionResult)}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {aiInvestigation.proposedAction.status === 'REJECTED' && (
+                      <div className="p-2.5 rounded-lg bg-rose-950/40 border border-rose-800/80 text-xs text-rose-300 space-y-1">
+                        <div className="flex items-center gap-1.5 font-semibold">
+                          <XCircle className="h-3.5 w-3.5 text-rose-400" />
+                          <span>Action Rejected by Operator</span>
+                        </div>
+                        <p className="text-[11px] text-slate-300">
+                          Rejected by <span className="font-mono text-rose-200">{aiInvestigation.proposedAction.reviewedBy || 'Operator'}</span>
+                          {aiInvestigation.proposedAction.reviewedAt && ` at ${new Date(aiInvestigation.proposedAction.reviewedAt).toLocaleTimeString()}`}.
+                        </p>
+                        {aiInvestigation.proposedAction.rejectionReason && (
+                          <p className="text-[11px] text-rose-200">
+                            <span className="text-slate-400">Reason: </span>
+                            {aiInvestigation.proposedAction.rejectionReason}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Human Approval Gate Controls (When PENDING_APPROVAL) */}
+                    {aiInvestigation.proposedAction.status === 'PENDING_APPROVAL' && (
+                      <div className="space-y-2.5 pt-1.5 border-t border-purple-900/60">
+                        <div className="p-2 rounded bg-amber-950/40 border border-amber-800/70 text-[11px] text-amber-300 flex items-center gap-1.5">
+                          <AlertTriangle className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                          <span>Human Safety Gate: Controlled action awaits operator authorization prior to execution.</span>
+                        </div>
+
+                        {actionError && (
+                          <div className="p-2 rounded bg-rose-950/60 border border-rose-800 text-[11px] text-rose-300 flex items-start justify-between gap-2">
+                            <span>{actionError}</span>
+                            <button
+                              onClick={() => setActionError(null)}
+                              className="text-rose-400 hover:text-rose-200 font-bold"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-2.5 pt-0.5">
+                          <button
+                            onClick={() => handleApproveAction(false)}
+                            disabled={isApprovingAction || isRejectingAction}
+                            className="flex-1 py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow transition-colors"
+                          >
+                            {isApprovingAction ? (
+                              <>
+                                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                                <span>Executing Action...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Check className="h-3.5 w-3.5" />
+                                <span>Approve & Execute</span>
+                              </>
+                            )}
+                          </button>
+
+                          <button
+                            onClick={() => setShowRejectModal(true)}
+                            disabled={isApprovingAction || isRejectingAction}
+                            className="py-2 px-3.5 rounded-lg bg-slate-800 hover:bg-rose-950 hover:border-rose-800 disabled:opacity-50 text-slate-300 hover:text-rose-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                          >
+                            <XCircle className="h-3.5 w-3.5 text-rose-400" />
+                            <span>Reject</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="p-3 bg-slate-950 rounded-lg border border-slate-800 text-[11px] text-slate-400 text-center">
@@ -1116,6 +1273,64 @@ export default function IncidentDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Phase 7: Action Rejection Modal Dialog */}
+      {showRejectModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 max-w-md w-full space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                <XCircle className="h-4 w-4 text-rose-400" />
+                Reject AI Proposed Action
+              </h3>
+              <button
+                onClick={() => setShowRejectModal(false)}
+                className="text-slate-400 hover:text-slate-200 text-sm font-bold p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Are you sure you want to reject the proposed action{" "}
+              <span className="font-mono text-purple-300 font-semibold">
+                &quot;{aiInvestigation?.proposedAction?.type}&quot;
+              </span>
+              ? An auditable event will be logged recording your decision and rationale.
+            </p>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                Rejection Rationale (Optional):
+              </label>
+              <textarea
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                placeholder="e.g. Service workload already mitigated via cache warm-up; manual verification preferred..."
+                rows={3}
+                className="w-full text-xs rounded-lg bg-slate-950 border border-slate-800 p-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 resize-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-1">
+              <button
+                onClick={() => setShowRejectModal(false)}
+                className="px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:text-slate-200 bg-slate-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRejectAction}
+                disabled={isRejectingAction}
+                className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 disabled:opacity-50 flex items-center gap-1.5 shadow transition-colors"
+              >
+                {isRejectingAction ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : null}
+                <span>Confirm Rejection</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

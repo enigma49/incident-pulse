@@ -216,10 +216,53 @@ Incident
 - **Evidence Verification**: Entity IDs are checked against `context.validEntityIds`. Unverified references are tagged `[Unverified Reference]`.
 - **Valid No-Action Output**: `proposedAction: null` is fully supported when telemetry does not indicate a safe automated action.
 
-### 6. Human Safety Boundary
+### 6. Human Safety Boundary & Phase 7 Human Approval
 - The AI engine investigates, reasons, and recommends. It **NEVER** autonomously executes state mutations.
 - Any proposed mitigation action is persisted strictly as `status: PENDING_APPROVAL`.
-- The execution gate and formal human approval workflow are exclusively owned by **Phase 7**.
+
+---
+
+## Phase 7: Human Approval & Controlled Action Execution
+
+### 1. Architectural Principles
+- **Separation of Powers**: AI proposes mutations; human operators approve or reject them; the backend execution engine deterministically validates and executes them.
+- **Role-Based Access Control**: Only authenticated users with `ADMIN` or `OPERATOR` roles may approve or reject proposed actions (`RolesGuard` with `@Roles(UserRole.ADMIN, UserRole.OPERATOR)`).
+
+### 2. Supported Controlled Actions
+1. **`CREATE_TASK`**:
+   - Creates a checklist task linked to the incident with title, description, and optional assignee.
+   - Triggers `EventsGateway.emitTaskCreated`.
+2. **`CHANGE_SEVERITY`**:
+   - Updates incident severity (`P1` through `P4`).
+   - Triggers `EventsGateway.emitIncidentSeverityChanged` and `emitIncidentUpdated`.
+3. **`CHANGE_STATUS`**:
+   - Updates incident status (`INVESTIGATING`, `MITIGATED`, `RESOLVED`, `OPEN`). Sets `resolvedAt` timestamp if status is `RESOLVED`.
+   - Triggers `EventsGateway.emitIncidentStatusChanged` and `emitIncidentUpdated`.
+4. **`ASSIGN_INCIDENT`**:
+   - Updates assigned team and/or responder.
+   - Triggers `EventsGateway.emitIncidentAssigned` and `emitIncidentUpdated`.
+
+### 3. Stale State Validation Guardrails
+Before any approved action is executed, the backend validates the live incident document against the proposed action parameters:
+- **Terminal State Lock**: Proposed actions (except status transitions) are rejected with `409 Conflict` if the incident is already in `RESOLVED` status.
+- **Redundant State Rejection**: If the incident is already in the target state (e.g., severity is already `P1`, or status is already `MITIGATED`), the mutation is rejected as stale (`409 Conflict`).
+- **Duplicate Task Prevention**: If an open task with the same title already exists on the incident, task creation is rejected as duplicate (`409 Conflict`).
+- **Already-Reviewed Check**: If an action has already been approved, executed, or rejected, subsequent review attempts are rejected with `400 Bad Request`.
+
+### 4. Auditing & Realtime Telemetry
+- **Dual Audit Logging**:
+  - `AI_ACTION_APPROVED`: Records the human operator who authorized the change, timestamp, and proposed action payload.
+  - `AI_ACTION_EXECUTED`: Records the system execution event and exact state delta (`executionResult`).
+  - `AI_ACTION_REJECTED`: Records the operator ID, timestamp, and optional rejection rationale.
+- **Cache Invalidation**: Automatically invalidates Redis cache key `incident:{id}:detail` and dashboard overview on review.
+- **Realtime Gateway Notifications**: Broadcasts `ai:investigation_event` with type `action_executed` or `action_rejected` to room `incident:{id}` for zero-refresh UI updates.
+
+### 5. API Endpoints
+- `POST /incidents/:id/investigation/actions/approve`: Approve and execute latest pending action.
+- `POST /incidents/:id/investigations/:investigationId/actions/approve`: Approve and execute specific action by investigation ID.
+- `POST /incidents/:id/investigation/actions/reject`: Reject latest pending action (optional body: `{ "reason": "..." }`).
+- `POST /incidents/:id/investigations/:investigationId/actions/reject`: Reject specific action by investigation ID.
+
 
 
 

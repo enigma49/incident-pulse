@@ -76,6 +76,15 @@ export class ProposedAction {
 
   @Prop({ type: String, default: null })
   reviewedBy?: string;
+
+  @Prop({ type: String, default: null })
+  rejectionReason?: string;
+
+  @Prop({ type: Object, default: null })
+  executionResult?: Record<string, any>;
+
+  @Prop({ type: String, default: null })
+  executionError?: string;
 }
 
 @Schema({ _id: false })

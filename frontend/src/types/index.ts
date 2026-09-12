@@ -112,6 +112,11 @@ export interface AIInvestigation {
     parameters: Record<string, any>;
     reason: string;
     status: 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'EXECUTED';
+    reviewedAt?: string;
+    reviewedBy?: string;
+    rejectionReason?: string;
+    executionResult?: Record<string, any>;
+    executionError?: string;
   } | null;
   provider?: string;
   aiModel?: string;
