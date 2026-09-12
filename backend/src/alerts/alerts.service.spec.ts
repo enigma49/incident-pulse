@@ -127,6 +127,36 @@ describe('AlertsService - Ingestion, Correlation & Escalation', () => {
       // No new incident or new alert should be created
       expect(incidentModel).not.toHaveBeenCalled();
     });
+
+    it('should escalate severity based on frequency count threshold', async () => {
+      const existingAlertDoc = {
+        _id: new Types.ObjectId(),
+        title: 'Minor Memory Warning',
+        service: 'payment-service',
+        severity: IncidentSeverity.P4,
+        count: 4, // 5th alert triggers >= 5 threshold (P3)
+        lastSeenAt: new Date(),
+        incidentId: null,
+        save: jest.fn().mockResolvedValue(true),
+      };
+
+      alertModel.findOne.mockReturnValue({
+        sort: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue(existingAlertDoc),
+        }),
+      });
+
+      const result = await service.ingest({
+        title: 'Minor Memory Warning',
+        severity: 'P4',
+        service: 'payment-service',
+      });
+
+      expect(result.deduplicated).toBe(true);
+      expect(result.escalated).toBe(true);
+      expect(existingAlertDoc.count).toBe(5);
+      expect(existingAlertDoc.severity).toBe(IncidentSeverity.P3);
+    });
   });
 
   describe('Correlation to existing active incident', () => {

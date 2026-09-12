@@ -89,10 +89,82 @@ export class AlertsService {
     if (existingAlert) {
       existingAlert.count = (existingAlert.count || 1) + 1;
       existingAlert.lastSeenAt = new Date();
+
+      // Check for severity escalation due to frequency count or incoming severity
+      const oldAlertSeverity: IncidentSeverity =
+        (existingAlert.severity as IncidentSeverity) || IncidentSeverity.P3;
+      let newAlertSeverity: IncidentSeverity =
+        (existingAlert.severity as IncidentSeverity) || IncidentSeverity.P3;
+
+      // 1. If incoming payload has higher severity (lower weight)
+      if (this.severityWeight(normalizedSeverity) < this.severityWeight(newAlertSeverity)) {
+        newAlertSeverity = normalizedSeverity;
+      }
+
+      // 2. Frequency threshold escalation:
+      // Count >= 30 => P1 (Critical)
+      // Count >= 15 => P2 (High)
+      // Count >= 5  => P3 (Medium)
+      if (existingAlert.count >= 30 && this.severityWeight(newAlertSeverity) > this.severityWeight(IncidentSeverity.P1)) {
+        newAlertSeverity = IncidentSeverity.P1;
+      } else if (existingAlert.count >= 15 && this.severityWeight(newAlertSeverity) > this.severityWeight(IncidentSeverity.P2)) {
+        newAlertSeverity = IncidentSeverity.P2;
+      } else if (existingAlert.count >= 5 && this.severityWeight(newAlertSeverity) > this.severityWeight(IncidentSeverity.P3)) {
+        newAlertSeverity = IncidentSeverity.P3;
+      }
+
+      let alertEscalated = false;
+      if (newAlertSeverity !== oldAlertSeverity) {
+        existingAlert.severity = newAlertSeverity;
+        alertEscalated = true;
+        this.logger.log(
+          `[Alert Ingest] Alert "${existingAlert.title}" frequency-escalated from ${oldAlertSeverity} to ${newAlertSeverity} (Count: ${existingAlert.count})`,
+        );
+      }
+
       await existingAlert.save();
 
+      // If linked to an active incident, escalate incident severity if alert is now more severe
+      let incidentEscalated = false;
+      if (existingAlert.incidentId && typeof this.incidentModel.findById === 'function') {
+        const query = this.incidentModel.findById(existingAlert.incidentId);
+        const linkedIncident = query?.exec ? await query.exec() : await query;
+        if (linkedIncident && linkedIncident.status !== IncidentStatus.RESOLVED) {
+          if (this.severityWeight(newAlertSeverity) < this.severityWeight(linkedIncident.severity)) {
+            const oldIncidentSev = linkedIncident.severity;
+            linkedIncident.severity = newAlertSeverity;
+            await linkedIncident.save();
+            incidentEscalated = true;
+
+            this.logger.log(
+              `[Correlation Escalation] Incident ${linkedIncident._id} escalated from ${oldIncidentSev} to ${newAlertSeverity} by recurring alert "${existingAlert.title}" (Count: ${existingAlert.count})`,
+            );
+
+            await this.auditService.logEvent({
+              incidentId: linkedIncident._id,
+              actorType: ActorType.SYSTEM,
+              actorId: 'correlation-engine',
+              action: 'SEVERITY_CHANGED',
+              entity: 'Incident',
+              entityId: linkedIncident._id.toString(),
+              metadata: {
+                reason: 'ALERT_FREQUENCY_ESCALATION',
+                alertId: existingAlert._id.toString(),
+                alertTitle: existingAlert.title,
+                count: existingAlert.count,
+                oldSeverity: oldIncidentSev,
+                newSeverity: newAlertSeverity,
+              },
+            });
+
+            this.eventsGateway.emitIncidentSeverityChanged(linkedIncident);
+            await this.redisService.invalidateIncident(linkedIncident._id.toString());
+          }
+        }
+      }
+
       this.logger.log(
-        `[Alert Ingest] Deduplicated alert "${dto.title}" on service "${dto.service}" (Count: ${existingAlert.count})`,
+        `[Alert Ingest] Deduplicated alert "${dto.title}" on service "${dto.service}" (Count: ${existingAlert.count}, Severity: ${existingAlert.severity})`,
       );
 
       return {
@@ -100,6 +172,7 @@ export class AlertsService {
         deduplicated: true,
         incidentId: existingAlert.incidentId || null,
         action: 'DEDUPLICATED',
+        escalated: alertEscalated || incidentEscalated,
       };
     }
 
