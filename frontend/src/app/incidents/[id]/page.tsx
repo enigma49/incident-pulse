@@ -203,8 +203,35 @@ export default function IncidentDetailPage() {
       refreshAudit();
     };
 
-    const onAIEvent = (aiEvent: { type: string; data: any }) => {
+    const onAIEvent = (aiEvent: { type: string; data?: any }) => {
       showNotification(`AI Engine: ${aiEvent.type}`);
+      if (aiEvent.type === "investigation_queued") {
+        setAiInvestigation((prev) => ({
+          ...(prev || ({} as any)),
+          status: "QUEUED",
+          summary: "Investigation enqueued in BullMQ background queue...",
+        }));
+      } else if (
+        aiEvent.type === "investigation_started" ||
+        aiEvent.type === "gathering_context" ||
+        aiEvent.type === "context_ready" ||
+        aiEvent.type === "reasoning" ||
+        aiEvent.type === "validating_output"
+      ) {
+        setAiInvestigation((prev) => ({
+          ...(prev || ({} as any)),
+          status: "RUNNING",
+          summary: aiEvent.data?.step || prev?.summary || "Investigating incident telemetry...",
+        }));
+      } else if (aiEvent.type === "completed") {
+        fetchIncidentDetail();
+      } else if (aiEvent.type === "failed") {
+        setAiInvestigation((prev) => ({
+          ...(prev || ({} as any)),
+          status: "FAILED",
+          error: aiEvent.data?.error || "Investigation failed",
+        }));
+      }
     };
 
     socket.on("incident:status_changed", onStatusChanged);
@@ -231,7 +258,23 @@ export default function IncidentDetailPage() {
       socket.off("alert:associated", onAlertAssociated);
       socket.off("ai:investigation_event", onAIEvent);
     };
-  }, [id, socket, joinIncident, leaveIncident, refreshAudit]);
+  }, [id, socket, joinIncident, leaveIncident, refreshAudit, fetchIncidentDetail]);
+
+  const [isTriggeringAI, setIsTriggeringAI] = useState(false);
+
+  const handleTriggerInvestigation = async () => {
+    if (!id) return;
+    setIsTriggeringAI(true);
+    try {
+      const res = await api.ai.investigate(id);
+      setAiInvestigation(res.investigation);
+      showNotification(res.message || "AI Investigation queued");
+    } catch (err: any) {
+      setError(err.message || "Failed to trigger AI investigation");
+    } finally {
+      setIsTriggeringAI(false);
+    }
+  };
 
   // Status Change
   const handleStatusChange = async (newStatus: IncidentStatus) => {
@@ -773,68 +816,261 @@ export default function IncidentDetailPage() {
           </div>
 
           {/* AI Investigation Status / Findings Card */}
-          <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
+          <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-4 shadow-lg">
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+              <div className="flex items-center gap-2">
                 <Cpu className="h-4 w-4 text-purple-400" />
-                AI Investigation
-              </h3>
-              <span
-                className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
-                  aiInvestigation
-                    ? "bg-purple-950 text-purple-300 border-purple-800"
-                    : "bg-slate-800 text-slate-400 border-slate-700"
-                }`}
-              >
-                {aiInvestigation ? aiInvestigation.status : "READY_FOR_AI"}
-              </span>
+                <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                  AI Investigation Engine
+                </h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <span
+                  className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                    aiInvestigation?.status === "COMPLETED"
+                      ? "bg-emerald-950 text-emerald-300 border-emerald-800 font-semibold"
+                      : aiInvestigation?.status === "RUNNING"
+                      ? "bg-blue-950 text-blue-300 border-blue-800 animate-pulse font-semibold"
+                      : aiInvestigation?.status === "QUEUED"
+                      ? "bg-amber-950 text-amber-300 border-amber-800 font-semibold"
+                      : aiInvestigation?.status === "FAILED"
+                      ? "bg-rose-950 text-rose-300 border-rose-800 font-semibold"
+                      : "bg-slate-800 text-slate-400 border-slate-700"
+                  }`}
+                >
+                  {aiInvestigation ? aiInvestigation.status : "NOT_STARTED"}
+                </span>
+
+                <button
+                  onClick={handleTriggerInvestigation}
+                  disabled={isTriggeringAI || aiInvestigation?.status === "RUNNING"}
+                  className="px-2.5 py-1 rounded bg-purple-700 hover:bg-purple-600 text-white text-[11px] font-semibold transition-colors disabled:opacity-50 flex items-center gap-1 shadow-md shadow-purple-700/20"
+                >
+                  <RefreshCw className={`h-3 w-3 ${isTriggeringAI ? "animate-spin" : ""}`} />
+                  {aiInvestigation ? "Re-investigate" : "Run AI Analysis"}
+                </button>
+              </div>
             </div>
 
-            {aiInvestigation ? (
-              <div className="space-y-3 text-xs">
-                <p className="text-slate-300 font-medium leading-relaxed bg-slate-950 p-2.5 rounded border border-slate-800">
-                  {aiInvestigation.summary}
-                </p>
+            {/* Provider and Confidence Header */}
+            {aiInvestigation && aiInvestigation.status === "COMPLETED" && (
+              <div className="p-2.5 bg-slate-950 rounded-lg border border-slate-800/80 flex items-center justify-between text-[11px]">
+                <div className="flex items-center gap-1.5 text-slate-400">
+                  <span>Engine:</span>
+                  <span className="font-mono text-purple-300 font-semibold uppercase">
+                    {aiInvestigation.provider || "mock"}
+                  </span>
+                  {aiInvestigation.latencyMs && (
+                    <span className="text-slate-500 font-mono">({aiInvestigation.latencyMs}ms)</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-400">Confidence:</span>
+                  <span className="font-bold text-emerald-400 font-mono">
+                    {aiInvestigation.confidence}%
+                  </span>
+                </div>
+              </div>
+            )}
 
-                {aiInvestigation.findings && aiInvestigation.findings.length > 0 && (
-                  <div>
-                    <span className="font-semibold text-slate-300 block mb-1">Key Findings:</span>
-                    <ul className="list-disc pl-4 space-y-1 text-slate-400">
-                      {aiInvestigation.findings.map((f, idx) => (
-                        <li key={idx}>{f}</li>
+            {/* Live Stepper for Queued / Running */}
+            {aiInvestigation && (aiInvestigation.status === "RUNNING" || aiInvestigation.status === "QUEUED") && (
+              <div className="p-4 rounded-lg bg-slate-950 border border-purple-900/50 space-y-3 animate-pulse">
+                <div className="flex items-center gap-2 text-xs font-semibold text-purple-300">
+                  <RefreshCw className="h-4 w-4 animate-spin text-purple-400" />
+                  <span>
+                    {aiInvestigation.status === "QUEUED"
+                      ? "Queued in BullMQ background queue..."
+                      : "Autonomous investigation in progress..."}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400">{aiInvestigation.summary}</p>
+                <div className="space-y-1.5 pt-1 text-[11px] text-slate-400 font-mono">
+                  <div className="flex items-center gap-2">
+                    <span className="h-1.5 w-1.5 rounded-full bg-purple-400" />
+                    <span>1. Enqueued to `incident-investigation` BullMQ queue</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-1.5 w-1.5 rounded-full bg-blue-400" />
+                    <span>2. Gathering telemetry, correlated alerts, tasks, and team activity</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
+                    <span>3. Provider reasoning via OpenRouter / Mock fallback</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                    <span>4. Validating output with Zod & grounding evidence references</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Failed Error View */}
+            {aiInvestigation && aiInvestigation.status === "FAILED" && (
+              <div className="p-3 bg-rose-950/60 border border-rose-800 rounded-lg text-xs text-rose-300 space-y-2">
+                <div className="flex items-center gap-2 font-bold">
+                  <AlertTriangle className="h-4 w-4 text-rose-400" />
+                  Investigation Failed
+                </div>
+                <p className="text-[11px] text-rose-200">{aiInvestigation.error || "An error occurred during AI analysis."}</p>
+                <button
+                  onClick={handleTriggerInvestigation}
+                  className="px-3 py-1 bg-rose-900 hover:bg-rose-800 text-white rounded text-[11px] font-semibold"
+                >
+                  Retry Investigation
+                </button>
+              </div>
+            )}
+
+            {/* Completed Investigation View */}
+            {aiInvestigation && aiInvestigation.status === "COMPLETED" && (
+              <div className="space-y-3.5 text-xs">
+                {/* Summary */}
+                <div className="p-3 bg-slate-950 rounded-lg border border-slate-800">
+                  <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider block mb-1">
+                    Executive Summary
+                  </span>
+                  <p className="text-slate-200 leading-relaxed">{aiInvestigation.summary}</p>
+                </div>
+
+                {/* Hypotheses */}
+                {aiInvestigation.hypotheses && aiInvestigation.hypotheses.length > 0 && (
+                  <div className="space-y-2">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+                      Formulated Hypotheses ({aiInvestigation.hypotheses.length})
+                    </span>
+                    <div className="space-y-2">
+                      {aiInvestigation.hypotheses.map((hypo, idx) => (
+                        <div
+                          key={idx}
+                          className="p-2.5 rounded-lg bg-slate-950 border border-slate-800/80 space-y-1.5"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold text-slate-200 text-xs">{hypo.title}</span>
+                            <span className="font-mono text-purple-400 text-[11px] font-bold">
+                              {hypo.confidence}%
+                            </span>
+                          </div>
+                          <p className="text-slate-400 text-[11px] leading-normal">{hypo.explanation}</p>
+                          <div className="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden">
+                            <div
+                              className="bg-purple-500 h-full rounded-full transition-all"
+                              style={{ width: `${hypo.confidence}%` }}
+                            />
+                          </div>
+                        </div>
                       ))}
-                    </ul>
+                    </div>
                   </div>
                 )}
 
-                {aiInvestigation.recommendations && aiInvestigation.recommendations.length > 0 && (
-                  <div>
-                    <span className="font-semibold text-slate-300 block mb-1">Recommendations:</span>
-                    <ul className="list-disc pl-4 space-y-1 text-slate-400">
-                      {aiInvestigation.recommendations.map((r, idx) => (
-                        <li key={idx}>{r}</li>
-                      ))}
-                    </ul>
+                {/* Evidence Grounding */}
+                {aiInvestigation.evidence && (aiInvestigation.evidence as any).length > 0 && (
+                  <div className="space-y-2">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+                      Grounded Evidence References
+                    </span>
+                    <div className="space-y-1.5">
+                      {(aiInvestigation.evidence as any[]).map((ev, idx) => {
+                        const isObj = typeof ev === "object";
+                        const type = isObj ? ev.type : "reference";
+                        const id = isObj ? ev.id : "";
+                        const reason = isObj ? ev.reason : ev;
+
+                        return (
+                          <div
+                            key={idx}
+                            className="p-2 rounded bg-slate-950 border border-slate-800/70 text-[11px] space-y-0.5"
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <span className="px-1.5 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800 uppercase font-mono text-[9px]">
+                                {type}
+                              </span>
+                              {id && (
+                                <span className="font-mono text-slate-400 text-[10px]">
+                                  #{id}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-slate-300 text-[11px]">{reason}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
 
-                {aiInvestigation.proposedAction && (
-                  <div className="p-3 bg-purple-950/40 border border-purple-800 rounded-lg space-y-2">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="font-bold text-purple-300">Proposed Action</span>
-                      <span className="font-mono text-purple-400">{aiInvestigation.proposedAction.status}</span>
+                {/* Recommendations */}
+                {aiInvestigation.recommendations && (aiInvestigation.recommendations as any).length > 0 && (
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+                      Actionable Recommendations
+                    </span>
+                    <div className="space-y-1.5">
+                      {(aiInvestigation.recommendations as any[]).map((rec, idx) => {
+                        const isObj = typeof rec === "object";
+                        return (
+                          <div
+                            key={idx}
+                            className="p-2 rounded bg-slate-950 border border-slate-800 text-[11px]"
+                          >
+                            <p className="font-semibold text-slate-200">
+                              {idx + 1}. {isObj ? rec.title : rec}
+                            </p>
+                            {isObj && rec.explanation && (
+                              <p className="text-slate-400 text-[10px] mt-0.5">{rec.explanation}</p>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
-                    <p className="text-slate-300 text-[11px]">{aiInvestigation.proposedAction.reason}</p>
-                    <div className="text-[10px] font-mono bg-slate-950 p-1.5 rounded text-purple-200">
-                      Type: {aiInvestigation.proposedAction.type}
+                  </div>
+                )}
+
+                {/* Proposed Mitigation Action (Human Safety Boundary) */}
+                {aiInvestigation.proposedAction ? (
+                  <div className="p-3 bg-purple-950/40 border border-purple-800/90 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-purple-300 text-xs">Proposed Mitigation Action</span>
+                      <span className="px-2 py-0.5 rounded bg-purple-900 text-purple-200 text-[10px] font-mono border border-purple-700">
+                        {aiInvestigation.proposedAction.status}
+                      </span>
                     </div>
+
+                    <p className="text-slate-300 text-[11px] font-medium">
+                      {aiInvestigation.proposedAction.description || aiInvestigation.proposedAction.reason}
+                    </p>
+
+                    <div className="p-2 rounded bg-slate-950 border border-purple-900/40 text-[10px] font-mono text-purple-200 space-y-1">
+                      <div>Action Type: {aiInvestigation.proposedAction.type}</div>
+                      {aiInvestigation.proposedAction.parameters && (
+                        <div>
+                          Params: {JSON.stringify(aiInvestigation.proposedAction.parameters)}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="p-2 rounded bg-amber-950/40 border border-amber-800/70 text-[10px] text-amber-300 flex items-center gap-1.5">
+                      <AlertTriangle className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                      <span>Human Safety Gate: Autonomous execution blocked. Formal review & execution activates in Phase 7.</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-slate-950 rounded-lg border border-slate-800 text-[11px] text-slate-400 text-center">
+                    <p className="font-semibold text-slate-300">No Automated Action Proposed</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      The AI model determined that manual operator investigation is preferred over automated remediation.
+                    </p>
                   </div>
                 )}
               </div>
-            ) : (
+            )}
+
+            {!aiInvestigation && (
               <div className="p-4 rounded bg-slate-950 border border-slate-800/80 text-center space-y-2">
                 <p className="text-xs text-slate-400">
-                  AI worker pipeline ready. Asynchronous background analysis activates in Phase 6.
+                  No investigation performed on this incident yet. Click &quot;Run AI Analysis&quot; to enqueue an asynchronous investigation.
                 </p>
               </div>
             )}

@@ -18,9 +18,45 @@ export enum ProposedActionStatus {
 }
 
 @Schema({ _id: false })
+export class Hypothesis {
+  @Prop({ required: true })
+  title: string;
+
+  @Prop({ required: true })
+  explanation: string;
+
+  @Prop({ required: true, default: 0 })
+  confidence: number;
+}
+
+@Schema({ _id: false })
+export class EvidenceItem {
+  @Prop({ required: true })
+  type: string; // e.g. 'alert', 'incident', 'log', 'metric'
+
+  @Prop({ required: true })
+  id: string; // actual referenced entity id
+
+  @Prop({ required: true })
+  reason: string;
+}
+
+@Schema({ _id: false })
+export class RecommendationItem {
+  @Prop({ required: true })
+  title: string;
+
+  @Prop({ required: true })
+  explanation: string;
+}
+
+@Schema({ _id: false })
 export class ProposedAction {
   @Prop({ required: true })
   type: string; // e.g. 'CHANGE_SEVERITY', 'ASSIGN_INCIDENT', 'CREATE_TASK', 'CHANGE_STATUS'
+
+  @Prop({ required: true, default: '' })
+  description: string;
 
   @Prop({ type: Object, required: true })
   parameters: Record<string, any>;
@@ -42,10 +78,25 @@ export class ProposedAction {
   reviewedBy?: string;
 }
 
+@Schema({ _id: false })
+export class TokenUsage {
+  @Prop({ default: 0 })
+  promptTokens: number;
+
+  @Prop({ default: 0 })
+  completionTokens: number;
+
+  @Prop({ default: 0 })
+  totalTokens: number;
+}
+
 @Schema({ timestamps: true })
 export class AIInvestigation {
   @Prop({ type: Types.ObjectId, ref: 'Incident', required: true, index: true })
   incidentId: Types.ObjectId;
+
+  @Prop({ required: true, default: '' })
+  incidentVersion: string;
 
   @Prop({
     required: true,
@@ -58,26 +109,38 @@ export class AIInvestigation {
   @Prop({ default: '' })
   summary: string;
 
-  @Prop({ type: [String], default: [] })
-  findings: string[];
+  @Prop({ type: [Hypothesis], default: [] })
+  hypotheses: Hypothesis[];
 
-  @Prop({ type: [String], default: [] })
-  evidence: string[];
+  @Prop({ type: [EvidenceItem], default: [] })
+  evidence: EvidenceItem[];
 
   @Prop({ type: Number, default: 0 })
   confidence: number;
 
-  @Prop({ type: [String], default: [] })
-  recommendations: string[];
+  @Prop({ type: [RecommendationItem], default: [] })
+  recommendations: RecommendationItem[];
 
   @Prop({ type: ProposedAction, default: null })
-  proposedAction?: ProposedAction;
+  proposedAction?: ProposedAction | null;
+
+  @Prop({ default: 'mock' })
+  provider: string;
+
+  @Prop({ default: 'mock-deterministic-v1' })
+  aiModel: string;
+
+  @Prop({ type: TokenUsage, default: () => ({ promptTokens: 0, completionTokens: 0, totalTokens: 0 }) })
+  tokenUsage: TokenUsage;
+
+  @Prop({ default: 0 })
+  latencyMs: number;
+
+  @Prop({ type: [String], default: [] })
+  progressEvents: string[];
 
   @Prop({ default: '' })
   rawOutput: string;
-
-  @Prop({ default: 0 })
-  roundCount: number;
 
   @Prop({ default: null })
   error?: string;
@@ -95,5 +158,5 @@ export class AIInvestigation {
 export const AIInvestigationSchema = SchemaFactory.createForClass(AIInvestigation);
 
 AIInvestigationSchema.index({ incidentId: 1, createdAt: -1 });
+AIInvestigationSchema.index({ incidentId: 1, incidentVersion: 1 });
 AIInvestigationSchema.index({ status: 1 });
-

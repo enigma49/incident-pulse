@@ -91,19 +91,42 @@ export interface AIInvestigation {
   incidentId: string;
   status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED';
   summary: string;
-  findings: string[];
-  evidence: string[];
+  hypotheses?: Array<{
+    title: string;
+    explanation: string;
+    confidence: number;
+  }>;
+  evidence?: Array<{
+    type: string;
+    id: string;
+    reason: string;
+  }> | string[];
   confidence: number;
-  recommendations: string[];
+  recommendations?: Array<{
+    title: string;
+    explanation: string;
+  }> | string[];
   proposedAction?: {
     type: string;
+    description?: string;
     parameters: Record<string, any>;
     reason: string;
     status: 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'EXECUTED';
+  } | null;
+  provider?: string;
+  aiModel?: string;
+  tokenUsage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
   };
+  latencyMs?: number;
+  progressEvents?: string[];
   error?: string;
   startedAt?: string;
   completedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface PaginatedResponse<T> {

@@ -163,6 +163,17 @@ export const api = {
     overview: () => request<any>('/dashboard/overview'),
   },
 
+  ai: {
+    investigate: (incidentId: string) =>
+      request<any>(`/incidents/${incidentId}/investigate`, {
+        method: 'POST',
+      }),
+    getLatest: (incidentId: string) =>
+      request<any>(`/incidents/${incidentId}/investigation`),
+    getHistory: (incidentId: string) =>
+      request<any[]>(`/incidents/${incidentId}/investigations`),
+  },
+
   health: () => request<any>('/health'),
 };
 
