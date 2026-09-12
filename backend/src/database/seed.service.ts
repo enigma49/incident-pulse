@@ -11,6 +11,7 @@ import { Comment, CommentDocument } from '../comments/schemas/comment.schema';
 import { Task, TaskDocument, TaskStatus } from '../tasks/schemas/task.schema';
 import { AuditEvent, AuditEventDocument, ActorType } from '../audit/schemas/audit-event.schema';
 import { AIInvestigation, AIInvestigationDocument, AIInvestigationStatus, ProposedActionStatus } from '../ai/schemas/ai-investigation.schema';
+import { CountersService } from '../common/counters/counters.service';
 
 @Injectable()
 export class SeedService implements OnApplicationBootstrap {
@@ -25,6 +26,7 @@ export class SeedService implements OnApplicationBootstrap {
     @InjectModel(Task.name) private taskModel: Model<TaskDocument>,
     @InjectModel(AuditEvent.name) private auditModel: Model<AuditEventDocument>,
     @InjectModel(AIInvestigation.name) private aiInvestigationModel: Model<AIInvestigationDocument>,
+    private countersService: CountersService,
   ) {}
 
   async onApplicationBootstrap() {
@@ -87,7 +89,7 @@ export class SeedService implements OnApplicationBootstrap {
     // 2. Users (1 Admin, 4 Operators)
     const usersData = [
       {
-        name: 'Admin Lead',
+        name: 'Admin User',
         email: 'admin@example.com',
         passwordHash: adminPasswordHash,
         role: UserRole.ADMIN,
@@ -95,7 +97,7 @@ export class SeedService implements OnApplicationBootstrap {
         isActive: true,
       },
       {
-        name: 'Lead Operator John',
+        name: 'Operator John',
         email: 'operator@example.com',
         passwordHash: operatorPasswordHash,
         role: UserRole.OPERATOR,
@@ -129,10 +131,10 @@ export class SeedService implements OnApplicationBootstrap {
     ];
 
     const createdUsers = await this.userModel.insertMany(usersData);
-    const [adminUser, leadOp, sarahOp, alexOp, davidOp] = createdUsers;
+    const [adminUser, johnOp, sarahOp, alexOp, davidOp] = createdUsers;
 
     // Set team leads
-    await this.teamModel.findByIdAndUpdate(infraTeam._id, { leadUserId: leadOp._id });
+    await this.teamModel.findByIdAndUpdate(infraTeam._id, { leadUserId: johnOp._id });
     await this.teamModel.findByIdAndUpdate(paymentsTeam._id, { leadUserId: sarahOp._id });
     await this.teamModel.findByIdAndUpdate(commerceTeam._id, { leadUserId: alexOp._id });
 
@@ -167,7 +169,7 @@ export class SeedService implements OnApplicationBootstrap {
       IncidentStatus.RESOLVED,
     ];
 
-    const operators = [leadOp, sarahOp, alexOp, davidOp];
+    const operators = [johnOp, sarahOp, alexOp, davidOp];
 
     const sampleIncidentTemplates = [
       {
@@ -229,11 +231,13 @@ export class SeedService implements OnApplicationBootstrap {
       const resolvedAt = status === IncidentStatus.RESOLVED ? updatedAt : null;
 
       incidentsToInsert.push({
+        incidentNumber: i,
         title: `${template.title} #${1000 + i}`,
         description: template.desc,
         status,
         severity,
-        service: serviceObj.name,
+        services: [serviceObj.name],
+        correlationKey: `service:${serviceObj.name.toLowerCase()}`,
         teamId: serviceObj.team._id,
         assigneeId: assignee ? assignee._id : null,
         tags: template.tags,
@@ -244,6 +248,7 @@ export class SeedService implements OnApplicationBootstrap {
     }
 
     const createdIncidents = await this.incidentModel.insertMany(incidentsToInsert);
+    await this.countersService.syncIncidentCounterToAtLeast(createdIncidents.length);
     this.logger.log(`Seeded ${createdIncidents.length} incidents successfully.`);
 
     // 4. Alerts (~150 alerts)
@@ -255,10 +260,10 @@ export class SeedService implements OnApplicationBootstrap {
       const inc = createdIncidents[i % createdIncidents.length];
       const timestamp = new Date(inc.createdAt.getTime() - Math.floor(Math.random() * 300000));
       alertsToInsert.push({
-        title: `Alert: High error rates on ${inc.service}`,
-        description: `Threshold exceeded for ${inc.service} - error rate > 5% over 5m interval.`,
+        title: `Alert: High error rates on ${inc.services[0]}`,
+        description: `Threshold exceeded for ${inc.services[0]} - error rate > 5% over 5m interval.`,
         severity: inc.severity,
-        service: inc.service,
+        service: inc.services[0],
         timestamp,
         source: alertSources[i % alertSources.length],
         rawPayload: { metric: 'http_requests_total', code: '5xx', threshold: 0.05, value: 0.082 },
@@ -305,15 +310,15 @@ export class SeedService implements OnApplicationBootstrap {
         action: 'INCIDENT_CREATED',
         entity: 'Incident',
         entityId: inc._id.toString(),
-        metadata: { title: inc.title, severity: inc.severity, service: inc.service },
+        metadata: { title: inc.title, severity: inc.severity, services: inc.services },
         timestamp: inc.createdAt,
       });
 
       // Comments
       commentsToInsert.push({
         incidentId: inc._id,
-        userId: leadOp._id,
-        content: `Triaging this incident. Checked APM traces for ${inc.service}, seeing upstream throttling.`,
+        userId: johnOp._id,
+        content: `Triaging this incident. Checked APM traces for ${inc.services.join(', ')}, seeing upstream throttling.`,
         createdAt: new Date(inc.createdAt.getTime() + 10 * 60 * 1000),
       });
 
@@ -332,7 +337,7 @@ export class SeedService implements OnApplicationBootstrap {
         title: 'Review container logs for panic or connection timeouts',
         description: 'Inspect stdout logs across last 30 minutes in Loki/Elasticsearch.',
         status: TaskStatus.COMPLETED,
-        assigneeId: inc.assigneeId || leadOp._id,
+        assigneeId: inc.assigneeId || johnOp._id,
         createdAt: new Date(inc.createdAt.getTime() + 5 * 60 * 1000),
       });
 
@@ -355,7 +360,7 @@ export class SeedService implements OnApplicationBootstrap {
     await this.aiInvestigationModel.create({
       incidentId: targetP1._id,
       status: AIInvestigationStatus.COMPLETED,
-      summary: `Automated investigation determined elevated error rate in ${targetP1.service} due to downstream dependency throttling and connection saturation.`,
+      summary: `Automated investigation determined elevated error rate in ${targetP1.services.join(', ')} due to downstream dependency throttling and connection saturation.`,
       findings: [
         'Sudden spike in downstream latency beginning at incident timestamp.',
         'Database connection pool saturated at 95% threshold for >10 consecutive minutes.',

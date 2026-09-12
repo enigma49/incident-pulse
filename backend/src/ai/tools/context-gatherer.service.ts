@@ -6,6 +6,7 @@ import { Alert, AlertDocument } from '../../alerts/schemas/alert.schema';
 import { Task, TaskDocument } from '../../tasks/schemas/task.schema';
 import { Comment, CommentDocument } from '../../comments/schemas/comment.schema';
 import { AuditService } from '../../audit/audit.service';
+import { IncidentRefService } from '../../incidents/incident-ref.service';
 
 export interface GroundedContext {
   incident: {
@@ -14,7 +15,7 @@ export interface GroundedContext {
     description: string;
     severity: string;
     status: string;
-    service: string;
+    services: string[];
     createdAt: Date;
     updatedAt: Date;
     version: string;
@@ -62,31 +63,37 @@ export class ContextGathererService {
     @InjectModel(Task.name) private taskModel: Model<TaskDocument>,
     @InjectModel(Comment.name) private commentModel: Model<CommentDocument>,
     private auditService: AuditService,
+    private incidentRefService: IncidentRefService,
   ) {}
 
   /**
    * Tool: get_incident
    */
   async getIncident(incidentId: string): Promise<IncidentDocument> {
-    const inc = await this.incidentModel
-      .findById(incidentId)
+    const inc = await this.incidentRefService.findByRefOrThrow(incidentId);
+    const populated = await this.incidentModel
+      .findById(inc._id)
       .populate('assigneeId', 'name email')
       .populate('teamId', 'name serviceResponsibility')
       .exec();
-    if (!inc) {
+    if (!populated) {
       throw new NotFoundException(`Incident ${incidentId} not found`);
     }
-    return inc;
+    return populated;
   }
 
   /**
    * Tool: get_related_alerts
    */
-  async getRelatedAlerts(incidentId: string, service: string) {
+  async getRelatedAlerts(incidentId: string, services: string[]) {
     const objId = new Types.ObjectId(incidentId);
+    const serviceFilter =
+      services.length > 0 ? { service: { $in: services }, status: 'UNASSIGNED' } : null;
     return this.alertModel
       .find({
-        $or: [{ incidentId: objId }, { service, status: 'UNASSIGNED' }],
+        $or: serviceFilter
+          ? [{ incidentId: objId }, serviceFilter]
+          : [{ incidentId: objId }],
       })
       .sort({ timestamp: -1 })
       .limit(20)
@@ -143,12 +150,15 @@ export class ContextGathererService {
   /**
    * Tool: search_similar_incidents
    */
-  async getSimilarIncidents(service: string, excludeIncidentId: string) {
+  async getSimilarIncidents(services: string[], excludeIncidentId: string) {
+    const filter: Record<string, any> = {
+      _id: { $ne: new Types.ObjectId(excludeIncidentId) },
+    };
+    if (services.length > 0) {
+      filter.services = { $in: services };
+    }
     return this.incidentModel
-      .find({
-        service,
-        _id: { $ne: new Types.ObjectId(excludeIncidentId) },
-      })
+      .find(filter)
       .sort({ createdAt: -1 })
       .limit(5)
       .exec();
@@ -163,11 +173,13 @@ export class ContextGathererService {
 
     validEntityIds.add(incident._id.toString());
 
+    const incidentServices = incident.services || [];
+
     const [alerts, activity, tasks, similarIncidents] = await Promise.all([
-      this.getRelatedAlerts(incident._id.toString(), incident.service),
+      this.getRelatedAlerts(incident._id.toString(), incidentServices),
       this.getRecentActivity(incident._id.toString()),
       this.getTasks(incident._id.toString()),
-      this.getSimilarIncidents(incident.service, incident._id.toString()),
+      this.getSimilarIncidents(incidentServices, incident._id.toString()),
     ]);
 
     alerts.forEach((a) => validEntityIds.add(a._id.toString()));
@@ -183,7 +195,7 @@ export class ContextGathererService {
         description: incident.description,
         severity: incident.severity,
         status: incident.status,
-        service: incident.service,
+        services: incidentServices,
         createdAt: incident.createdAt,
         updatedAt: incident.updatedAt,
         version: incidentVersion,

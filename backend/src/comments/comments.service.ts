@@ -8,6 +8,7 @@ import { ActorType } from '../audit/schemas/audit-event.schema';
 import { CreateCommentDto } from './dto/comment.dto';
 import { RedisService } from '../common/redis/redis.service';
 import { EventsGateway } from '../events/events.gateway';
+import { IncidentRefService } from '../incidents/incident-ref.service';
 
 @Injectable()
 export class CommentsService {
@@ -19,6 +20,7 @@ export class CommentsService {
     private auditService: AuditService,
     private redisService: RedisService,
     private eventsGateway: EventsGateway,
+    private incidentRefService: IncidentRefService,
   ) {}
 
   async create(
@@ -26,17 +28,11 @@ export class CommentsService {
     dto: CreateCommentDto,
     currentUser: any,
   ): Promise<CommentDocument> {
-    if (!Types.ObjectId.isValid(incidentId)) {
-      throw new BadRequestException(`Invalid incident ID format: ${incidentId}`);
-    }
-
-    const incident = await this.incidentModel.findById(incidentId);
-    if (!incident) {
-      throw new NotFoundException(`Incident ${incidentId} not found`);
-    }
+    const incident = await this.incidentRefService.findByRefOrThrow(incidentId);
+    const objectId = incident._id.toString();
 
     const comment = new this.commentModel({
-      incidentId: new Types.ObjectId(incidentId),
+      incidentId: incident._id,
       userId: new Types.ObjectId(currentUser.userId),
       content: dto.content,
     });
@@ -54,26 +50,23 @@ export class CommentsService {
     });
 
     // Invalidate incident detail cache
-    await this.redisService.invalidateIncident(incidentId);
+    await this.redisService.invalidateIncident(objectId);
 
     const populated = await saved.populate('userId', 'name email role');
 
     // Emit realtime event
-    this.eventsGateway.emitCommentCreated(incidentId, populated);
+    this.eventsGateway.emitCommentCreated(objectId, populated);
 
     return populated;
   }
 
   async findByIncident(incidentId: string): Promise<CommentDocument[]> {
-    if (!Types.ObjectId.isValid(incidentId)) {
-      throw new BadRequestException(`Invalid incident ID format: ${incidentId}`);
-    }
+    const incident = await this.incidentRefService.findByRefOrThrow(incidentId);
 
     return this.commentModel
-      .find({ incidentId: new Types.ObjectId(incidentId) })
+      .find({ incidentId: incident._id })
       .populate('userId', 'name email role')
       .sort({ createdAt: 1 })
       .exec();
   }
 }
-

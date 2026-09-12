@@ -13,6 +13,7 @@ import { ContextGathererService } from './tools/context-gatherer.service';
 import { MockAIProvider } from './providers/mock-ai.provider';
 import { OpenRouterProvider } from './providers/openrouter.provider';
 import { AIProviderFactory } from './providers/ai-provider.factory';
+import { IncidentsModule } from '../incidents/incidents.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { AIProviderFactory } from './providers/ai-provider.factory';
     ]),
     AuditModule,
     RedisModule,
+    IncidentsModule,
   ],
   providers: [
     AIService,

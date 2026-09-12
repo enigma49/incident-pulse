@@ -9,6 +9,13 @@ import { ActorType } from '../audit/schemas/audit-event.schema';
 import { RedisService } from '../common/redis/redis.service';
 import { EventsGateway } from '../events/events.gateway';
 import { CreateAlertDto, QueryAlertsDto, AssociateAlertDto } from './dto/alert.dto';
+import { IncidentRefService } from '../incidents/incident-ref.service';
+import { mergeServices } from '../incidents/incident-services.util';
+import {
+  buildResourceClusterTitle,
+  CorrelationStrategy,
+  resolveCorrelationKey,
+} from './correlation/correlation-key';
 
 @Injectable()
 export class AlertsService {
@@ -20,6 +27,7 @@ export class AlertsService {
     private auditService: AuditService,
     private redisService: RedisService,
     private eventsGateway: EventsGateway,
+    private incidentRefService: IncidentRefService,
   ) {}
 
   /**
@@ -65,6 +73,37 @@ export class AlertsService {
     return crypto.createHash('sha256').update(raw).digest('hex');
   }
 
+  private addService(incident: IncidentDocument, service: string): string[] {
+    incident.services = mergeServices(incident.services, service);
+    return incident.services;
+  }
+
+  private maybeRetitleResourceCluster(
+    incident: IncidentDocument,
+    resource: string | null,
+    strategy: CorrelationStrategy,
+  ): void {
+    switch (strategy) {
+      case 'RESOURCE': {
+        if (!resource) {
+          return;
+        }
+        const services = incident.services || [];
+        if (services.length <= 1) {
+          return;
+        }
+        incident.title = buildResourceClusterTitle(resource, services);
+        return;
+      }
+      case 'SERVICE':
+        return;
+      default: {
+        const unexpected: never = strategy;
+        throw new Error(`Unexpected correlation strategy: ${unexpected}`);
+      }
+    }
+  }
+
   /**
    * Ingest an incoming alert:
    * 1. Deduplication check within 5 minutes
@@ -75,6 +114,13 @@ export class AlertsService {
   async ingest(dto: CreateAlertDto, currentUser?: any) {
     const normalizedSeverity = this.normalizeSeverity(dto.severity);
     const fingerprint = this.calculateFingerprint(dto.service, dto.title, dto.source);
+    const correlation = resolveCorrelationKey({
+      service: dto.service,
+      title: dto.title,
+      description: dto.description,
+      resource: dto.resource,
+      rawPayload: dto.rawPayload,
+    });
 
     // 1. Deduplication check (5-minute sliding window)
     const dedupeWindow = new Date(Date.now() - 5 * 60 * 1000);
@@ -182,6 +228,8 @@ export class AlertsService {
       description: dto.description || dto.title || 'No description provided.',
       severity: normalizedSeverity,
       service: dto.service,
+      resource: correlation.resource,
+      correlationKey: correlation.key,
       source: dto.source || 'Prometheus',
       rawPayload: dto.rawPayload || {},
       timestamp: dto.timestamp ? new Date(dto.timestamp) : new Date(),
@@ -197,7 +245,7 @@ export class AlertsService {
     const correlationWindow = new Date(Date.now() - 30 * 60 * 1000);
     const activeIncident = await this.incidentModel
       .findOne({
-        service: dto.service,
+        correlationKey: correlation.key,
         status: { $ne: IncidentStatus.RESOLVED },
         updatedAt: { $gte: correlationWindow },
       })
@@ -210,6 +258,13 @@ export class AlertsService {
       savedAlert.status = AlertStatus.CORRELATED;
       await savedAlert.save();
 
+      this.addService(activeIncident, savedAlert.service);
+      this.maybeRetitleResourceCluster(
+        activeIncident,
+        correlation.resource,
+        correlation.strategy,
+      );
+
       let escalated = false;
       const alertWeight = this.severityWeight(normalizedSeverity);
       const incidentWeight = this.severityWeight(activeIncident.severity);
@@ -218,7 +273,6 @@ export class AlertsService {
       if (alertWeight < incidentWeight) {
         const oldSeverity = activeIncident.severity;
         activeIncident.severity = normalizedSeverity;
-        await activeIncident.save();
         escalated = true;
 
         this.logger.log(
@@ -244,6 +298,8 @@ export class AlertsService {
         this.eventsGateway.emitIncidentSeverityChanged(activeIncident);
       }
 
+      await activeIncident.save();
+
       await this.auditService.logEvent({
         incidentId: activeIncident._id,
         actorType: ActorType.SYSTEM,
@@ -255,6 +311,8 @@ export class AlertsService {
           alertTitle: savedAlert.title,
           severity: savedAlert.severity,
           service: savedAlert.service,
+          correlationKey: correlation.key,
+          services: activeIncident.services,
           escalated,
         },
       });
@@ -273,13 +331,26 @@ export class AlertsService {
       };
     } else {
       // 4. No active incident in correlation window -> Create new incident
+      const incidentNumber = await this.incidentRefService.getNextIncidentNumber();
+      const tags = ['auto-created', 'alert-cluster', savedAlert.service];
+      if (correlation.resource) {
+        tags.push(`resource:${correlation.resource}`);
+      }
+
+      const title =
+        correlation.strategy === 'RESOURCE' && correlation.resource
+          ? `[Incident] Shared dependency ${correlation.resource} impacting ${savedAlert.service}`
+          : `[Incident] ${savedAlert.title} (${savedAlert.service})`;
+
       const newIncident = new this.incidentModel({
-        title: `[Incident] ${savedAlert.title} (${savedAlert.service})`,
+        incidentNumber,
+        title,
         description: `Automated incident created by correlation engine from incoming alert: ${savedAlert.title}\n\n${savedAlert.description || 'No description provided.'}`,
         severity: normalizedSeverity,
-        service: savedAlert.service,
+        services: [savedAlert.service],
+        correlationKey: correlation.key,
         status: IncidentStatus.OPEN,
-        tags: ['auto-created', 'alert-cluster', savedAlert.service],
+        tags,
       });
 
       const savedIncident = await newIncident.save();
@@ -332,14 +403,17 @@ export class AlertsService {
       throw new NotFoundException(`Alert ${alertId} not found`);
     }
 
-    const incident = await this.incidentModel.findById(dto.incidentId);
-    if (!incident) {
-      throw new NotFoundException(`Incident ${dto.incidentId} not found`);
+    const incident = await this.incidentRefService.findByRefOrThrow(dto.incidentId);
+    if (incident.status === IncidentStatus.RESOLVED) {
+      throw new BadRequestException('Cannot associate alerts to a resolved incident');
     }
 
     alert.incidentId = incident._id;
     alert.status = AlertStatus.CORRELATED;
     await alert.save();
+
+    this.addService(incident, alert.service);
+    await incident.save();
 
     await this.auditService.logEvent({
       incidentId: incident._id,
@@ -350,6 +424,8 @@ export class AlertsService {
       entityId: alert._id.toString(),
       metadata: {
         alertTitle: alert.title,
+        service: alert.service,
+        services: incident.services,
         manual: true,
       },
     });

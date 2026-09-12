@@ -2,7 +2,9 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { api } from "../lib/api";
+import { getIncidentLinkTarget, getIncidentRouteId } from "../lib/incident-id";
 import { useAuth } from "../context/AuthContext";
 import {
   Activity,
@@ -10,7 +12,6 @@ import {
   CheckCircle2,
   Clock,
   RefreshCw,
-  Zap,
   ArrowRight,
   Shield,
   Layers,
@@ -25,6 +26,7 @@ import {
 import { useSocket } from "../context/SocketContext";
 
 export default function OperationsOverviewPage() {
+  const router = useRouter();
   const { user } = useAuth();
   const { socket, joinDashboard, leaveDashboard, reconnectEpoch, isConnected } = useSocket();
   const [data, setData] = useState<any>(null);
@@ -97,6 +99,15 @@ export default function OperationsOverviewPage() {
     };
   }, [socket, joinDashboard, leaveDashboard, fetchOverview]);
 
+  const clickableCardClass =
+    "block p-5 rounded-xl bg-white border border-slate-200 space-y-2 hover:border-slate-300 hover:shadow-sm transition-all cursor-pointer";
+  const clickableBreakdownClass =
+    "block p-3 rounded-lg border space-y-1 hover:shadow-sm transition-all cursor-pointer";
+  const clickableMetricSubClass =
+    "block p-3 rounded-lg border space-y-1 hover:shadow-sm transition-all cursor-pointer text-center";
+  const clickableListItemClass =
+    "block p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs space-y-1 hover:border-slate-300 hover:shadow-sm transition-all cursor-pointer";
+
   const aiOverview = data?.aiOverview || {
     total: 0,
     queued: 0,
@@ -110,42 +121,68 @@ export default function OperationsOverviewPage() {
     recentInvestigations: [],
   };
 
+  const incidentHref = (
+    incidentRef: any,
+  ) => {
+    const target = getIncidentLinkTarget(incidentRef);
+    return target ? `/incidents/${target}` : "/incidents";
+  };
+
+  const pendingApprovalInvestigations =
+    aiOverview.recentInvestigations?.filter(
+      (inv: { proposedAction?: { status?: string } }) => inv.proposedAction?.status === "PENDING_APPROVAL",
+    ) ?? [];
+
+  const firstPendingApprovalHref = incidentHref(pendingApprovalInvestigations[0]?.incidentId);
+  const firstRecentInvestigationHref = incidentHref(aiOverview.recentInvestigations?.[0]?.incidentId);
+
+  const firstCompletedInvestigation = aiOverview.recentInvestigations?.find(
+    (inv: { status?: string }) => inv.status === "COMPLETED",
+  );
+  const firstActiveInvestigation = aiOverview.recentInvestigations?.find(
+    (inv: { status?: string }) => inv.status === "QUEUED" || inv.status === "RUNNING",
+  );
+
+  const getAuditEventHref = (ev: {
+    incidentId?: any;
+    entity?: string;
+    entityId?: string;
+  }) => {
+    if (ev.incidentId) {
+      return incidentHref(ev.incidentId);
+    }
+    if (ev.entity === "Incident" && ev.entityId) {
+      return `/incidents/${ev.entityId}`;
+    }
+    return "/incidents";
+  };
+
   return (
     <div className="space-y-6">
-      {/* Header with Cache status indicator & Realtime sync */}
+      {/* Header with realtime sync */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2.5">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2.5">
             <Activity className="h-6 w-6 text-blue-500" />
             Operations Overview
           </h1>
           <p className="text-sm text-slate-400">
-            Real-time operational health, incident velocity, and Redis-cached metrics overview.
+            Real-time operational health and incident velocity overview.
           </p>
         </div>
 
         <div className="flex items-center gap-3">
           {lastEvent && (
-            <div className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-950/40 border border-emerald-800 text-xs text-emerald-300">
+            <div className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-700">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />
               <span>Live: {lastEvent}</span>
-            </div>
-          )}
-
-          {data && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs">
-              <Zap className={`h-3.5 w-3.5 ${data.fromCache ? "text-amber-400 fill-amber-400/30" : "text-blue-400"}`} />
-              <span className="text-slate-400">Cache:</span>
-              <span className={`font-mono font-semibold ${data.fromCache ? "text-amber-400" : "text-blue-400"}`}>
-                {data.fromCache ? "HIT (Redis - 30s TTL)" : "MISS (DB Aggregated)"}
-              </span>
             </div>
           )}
 
           <button
             onClick={fetchOverview}
             disabled={refreshing}
-            className="px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50"
+            className="px-3.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-slate-800 text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50"
             title="Refresh overview metrics"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin text-blue-400" : ""}`} />
@@ -157,15 +194,15 @@ export default function OperationsOverviewPage() {
       {loading ? (
         <div className="p-20 text-center space-y-3">
           <RefreshCw className="h-8 w-8 animate-spin mx-auto text-blue-500" />
-          <p className="text-sm text-slate-400">Aggregating incident telemetry & querying Redis cache...</p>
+          <p className="text-sm text-slate-400">Aggregating incident telemetry...</p>
         </div>
       ) : error ? (
-        <div className="p-12 text-center space-y-3 bg-slate-900 border border-slate-800 rounded-xl">
+        <div className="p-12 text-center space-y-3 bg-white border border-slate-200 rounded-xl">
           <AlertTriangle className="h-8 w-8 text-rose-400 mx-auto" />
-          <p className="text-sm text-rose-300">{error}</p>
+          <p className="text-sm text-rose-700">{error}</p>
           <button
             onClick={fetchOverview}
-            className="px-3 py-1.5 rounded bg-slate-800 text-slate-200 text-xs font-medium"
+            className="px-3 py-1.5 rounded bg-slate-100 text-slate-800 text-xs font-medium"
           >
             Retry
           </button>
@@ -174,18 +211,21 @@ export default function OperationsOverviewPage() {
         <>
           {/* Top Metric Cards (5 Columns) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-            <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+            <Link href="/incidents?status=OPEN" className={clickableCardClass}>
               <div className="flex items-center justify-between text-xs text-slate-400">
                 <span className="font-medium">Active Incidents</span>
                 <Activity className="h-4 w-4 text-blue-400" />
               </div>
-              <div className="text-3xl font-bold tracking-tight text-white font-mono">
+              <div className="text-3xl font-bold tracking-tight text-slate-900 font-mono">
                 {data.openIncidents}
               </div>
               <p className="text-xs text-slate-500">Unresolved operational incidents</p>
-            </div>
+            </Link>
 
-            <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+            <Link
+              href="/incidents?severities=P1,P2&excludeStatus=RESOLVED"
+              className={clickableCardClass}
+            >
               <div className="flex items-center justify-between text-xs text-slate-400">
                 <span className="font-medium">Critical (P1 & P2)</span>
                 <AlertTriangle className="h-4 w-4 text-rose-400" />
@@ -194,9 +234,9 @@ export default function OperationsOverviewPage() {
                 {data.criticalIncidents}
               </div>
               <p className="text-xs text-slate-500">High severity active alerts</p>
-            </div>
+            </Link>
 
-            <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+            <Link href="/incidents?status=MITIGATED" className={clickableCardClass}>
               <div className="flex items-center justify-between text-xs text-slate-400">
                 <span className="font-medium">Mitigated</span>
                 <Clock className="h-4 w-4 text-amber-400" />
@@ -205,21 +245,24 @@ export default function OperationsOverviewPage() {
                 {data.mitigatedIncidents}
               </div>
               <p className="text-xs text-slate-500">Workarounds applied, pending close</p>
-            </div>
+            </Link>
 
             {/* Pending Human Approval Gate Card */}
-            <div className="p-5 rounded-xl bg-slate-900 border border-purple-900/60 bg-gradient-to-br from-slate-900 to-purple-950/20 space-y-2">
-              <div className="flex items-center justify-between text-xs text-purple-300">
+            <Link
+              href={firstPendingApprovalHref}
+              className={`${clickableCardClass} border-purple-200 bg-gradient-to-br from-white to-purple-50`}
+            >
+              <div className="flex items-center justify-between text-xs text-purple-700">
                 <span className="font-medium">Awaiting Approval</span>
                 <ShieldAlert className="h-4 w-4 text-purple-400" />
               </div>
-              <div className="text-3xl font-bold tracking-tight text-purple-300 font-mono">
+              <div className="text-3xl font-bold tracking-tight text-purple-700 font-mono">
                 {aiOverview.pendingApprovalActions}
               </div>
-              <p className="text-xs text-purple-400/80">AI actions awaiting human sign-off</p>
-            </div>
+              <p className="text-xs text-purple-600">AI actions awaiting human sign-off</p>
+            </Link>
 
-            <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+            <Link href="/incidents" className={clickableCardClass}>
               <div className="flex items-center justify-between text-xs text-slate-400">
                 <span className="font-medium">Total Volume</span>
                 <CheckCircle2 className="h-4 w-4 text-emerald-400" />
@@ -228,83 +271,107 @@ export default function OperationsOverviewPage() {
                 {data.totalIncidents}
               </div>
               <p className="text-xs text-slate-500">Cumulative historical incidents</p>
-            </div>
+            </Link>
           </div>
 
           {/* Breakdown Grids */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Severity Distribution */}
-            <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-4">
-              <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">Severity Breakdown</h3>
+            <div className="p-5 rounded-xl bg-white border border-slate-200 space-y-4">
+              <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">Severity Breakdown</h3>
               <div className="grid grid-cols-4 gap-3 text-center">
-                <div className="p-3 rounded-lg bg-rose-950/40 border border-rose-900/60 space-y-1">
+                <Link
+                  href="/incidents?severity=P1"
+                  className={`${clickableBreakdownClass} bg-rose-50 border-rose-200 hover:border-rose-300`}
+                >
                   <span className="text-xs font-bold text-rose-400">P1 Critical</span>
-                  <div className="text-xl font-mono font-bold text-rose-300">
+                  <div className="text-xl font-mono font-bold text-rose-700">
                     {data.severityBreakdown?.P1 || 0}
                   </div>
-                </div>
-                <div className="p-3 rounded-lg bg-amber-950/40 border border-amber-900/60 space-y-1">
+                </Link>
+                <Link
+                  href="/incidents?severity=P2"
+                  className={`${clickableBreakdownClass} bg-amber-50 border-amber-200 hover:border-amber-300`}
+                >
                   <span className="text-xs font-bold text-amber-400">P2 High</span>
-                  <div className="text-xl font-mono font-bold text-amber-300">
+                  <div className="text-xl font-mono font-bold text-amber-700">
                     {data.severityBreakdown?.P2 || 0}
                   </div>
-                </div>
-                <div className="p-3 rounded-lg bg-yellow-950/40 border border-yellow-900/60 space-y-1">
+                </Link>
+                <Link
+                  href="/incidents?severity=P3"
+                  className={`${clickableBreakdownClass} bg-yellow-50 border-yellow-200 hover:border-yellow-300`}
+                >
                   <span className="text-xs font-bold text-yellow-400">P3 Medium</span>
-                  <div className="text-xl font-mono font-bold text-yellow-300">
+                  <div className="text-xl font-mono font-bold text-yellow-700">
                     {data.severityBreakdown?.P3 || 0}
                   </div>
-                </div>
-                <div className="p-3 rounded-lg bg-blue-950/40 border border-blue-900/60 space-y-1">
+                </Link>
+                <Link
+                  href="/incidents?severity=P4"
+                  className={`${clickableBreakdownClass} bg-blue-50 border-blue-200 hover:border-blue-300`}
+                >
                   <span className="text-xs font-bold text-blue-400">P4 Low</span>
-                  <div className="text-xl font-mono font-bold text-blue-300">
+                  <div className="text-xl font-mono font-bold text-blue-700">
                     {data.severityBreakdown?.P4 || 0}
                   </div>
-                </div>
+                </Link>
               </div>
             </div>
 
             {/* Status Distribution */}
-            <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-4">
-              <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">Status Distribution</h3>
+            <div className="p-5 rounded-xl bg-white border border-slate-200 space-y-4">
+              <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">Status Distribution</h3>
               <div className="grid grid-cols-4 gap-3 text-center">
-                <div className="p-3 rounded-lg bg-blue-950/40 border border-blue-900/60 space-y-1">
+                <Link
+                  href="/incidents?status=OPEN"
+                  className={`${clickableBreakdownClass} bg-blue-50 border-blue-200 hover:border-blue-300`}
+                >
                   <span className="text-xs font-semibold text-blue-400">OPEN</span>
-                  <div className="text-xl font-mono font-bold text-blue-300">
+                  <div className="text-xl font-mono font-bold text-blue-700">
                     {data.statusBreakdown?.OPEN || 0}
                   </div>
-                </div>
-                <div className="p-3 rounded-lg bg-purple-950/40 border border-purple-900/60 space-y-1">
+                </Link>
+                <Link
+                  href="/incidents?status=INVESTIGATING"
+                  className={`${clickableBreakdownClass} bg-purple-50 border-purple-200 hover:border-purple-300`}
+                >
                   <span className="text-xs font-semibold text-purple-400">INVESTIGATING</span>
-                  <div className="text-xl font-mono font-bold text-purple-300">
+                  <div className="text-xl font-mono font-bold text-purple-700">
                     {data.statusBreakdown?.INVESTIGATING || 0}
                   </div>
-                </div>
-                <div className="p-3 rounded-lg bg-amber-950/40 border border-amber-900/60 space-y-1">
+                </Link>
+                <Link
+                  href="/incidents?status=MITIGATED"
+                  className={`${clickableBreakdownClass} bg-amber-50 border-amber-200 hover:border-amber-300`}
+                >
                   <span className="text-xs font-semibold text-amber-400">MITIGATED</span>
-                  <div className="text-xl font-mono font-bold text-amber-300">
+                  <div className="text-xl font-mono font-bold text-amber-700">
                     {data.statusBreakdown?.MITIGATED || 0}
                   </div>
-                </div>
-                <div className="p-3 rounded-lg bg-emerald-950/40 border border-emerald-900/60 space-y-1">
+                </Link>
+                <Link
+                  href="/incidents?status=RESOLVED"
+                  className={`${clickableBreakdownClass} bg-emerald-50 border-emerald-200 hover:border-emerald-300`}
+                >
                   <span className="text-xs font-semibold text-emerald-400">RESOLVED</span>
-                  <div className="text-xl font-mono font-bold text-emerald-300">
+                  <div className="text-xl font-mono font-bold text-emerald-700">
                     {data.statusBreakdown?.RESOLVED || 0}
                   </div>
-                </div>
+                </Link>
               </div>
             </div>
           </div>
 
           {/* Phase 8: AI Investigation Engine & Human Oversight Operations */}
-          <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-5">
+          <div className="p-5 rounded-xl bg-white border border-slate-200 space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div className="flex items-center gap-2.5">
-                <div className="p-1.5 rounded-lg bg-purple-950/80 border border-purple-800 text-purple-300">
+                <div className="p-1.5 rounded-lg bg-purple-50 border border-purple-200 text-purple-700">
                   <Bot className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                     AI Investigation Engine & Human Oversight
                   </h3>
                   <p className="text-xs text-slate-400">
@@ -314,125 +381,149 @@ export default function OperationsOverviewPage() {
               </div>
 
               <div className="flex items-center gap-2 text-xs font-mono">
-                <span className="px-2 py-1 rounded bg-slate-950 border border-slate-800 text-slate-300">
+                <Link
+                  href={firstActiveInvestigation ? incidentHref(firstActiveInvestigation.incidentId) : "/incidents?status=INVESTIGATING"}
+                  className="px-2 py-1 rounded bg-slate-50 border border-slate-200 text-slate-700 hover:border-slate-300 hover:shadow-sm transition-all"
+                >
                   Workers: {aiOverview.running > 0 ? `${aiOverview.running} active` : "Idle"}
-                </span>
-                <span className="px-2 py-1 rounded bg-purple-950/60 border border-purple-800 text-purple-300">
+                </Link>
+                <Link
+                  href={firstRecentInvestigationHref}
+                  className="px-2 py-1 rounded bg-purple-50 border border-purple-200 text-purple-700 hover:border-purple-300 hover:shadow-sm transition-all"
+                >
                   Avg Confidence: {aiOverview.avgConfidence}%
-                </span>
+                </Link>
               </div>
             </div>
 
             {/* AI Metrics Sub-grid */}
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 text-center">
-              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
+              <Link href={firstRecentInvestigationHref} className={`${clickableMetricSubClass} bg-slate-50 border-slate-200`}>
                 <span className="text-[11px] text-slate-400">Total Run</span>
-                <div className="text-lg font-mono font-bold text-slate-200">{aiOverview.total}</div>
-              </div>
-              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
+                <div className="text-lg font-mono font-bold text-slate-800">{aiOverview.total}</div>
+              </Link>
+              <Link
+                href={firstCompletedInvestigation ? incidentHref(firstCompletedInvestigation.incidentId) : "/incidents?status=RESOLVED"}
+                className={`${clickableMetricSubClass} bg-slate-50 border-slate-200`}
+              >
                 <span className="text-[11px] text-emerald-400">Completed</span>
-                <div className="text-lg font-mono font-bold text-emerald-300">{aiOverview.completed}</div>
-              </div>
-              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
+                <div className="text-lg font-mono font-bold text-emerald-700">{aiOverview.completed}</div>
+              </Link>
+              <Link
+                href={firstActiveInvestigation ? incidentHref(firstActiveInvestigation.incidentId) : "/incidents?status=INVESTIGATING"}
+                className={`${clickableMetricSubClass} bg-slate-50 border-slate-200`}
+              >
                 <span className="text-[11px] text-blue-400">Queued / Active</span>
-                <div className="text-lg font-mono font-bold text-blue-300">
+                <div className="text-lg font-mono font-bold text-blue-700">
                   {aiOverview.queued + aiOverview.running}
                 </div>
-              </div>
-              <div className="p-3 rounded-lg bg-purple-950/40 border border-purple-800/80 space-y-1">
-                <span className="text-[11px] text-purple-300 font-semibold">Pending Review</span>
-                <div className="text-lg font-mono font-bold text-purple-200">
+              </Link>
+              <Link
+                href={firstPendingApprovalHref}
+                className={`${clickableMetricSubClass} bg-purple-50 border-purple-200 hover:border-purple-300`}
+              >
+                <span className="text-[11px] text-purple-700 font-semibold">Pending Review</span>
+                <div className="text-lg font-mono font-bold text-purple-800">
                   {aiOverview.pendingApprovalActions}
                 </div>
-              </div>
-              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
+              </Link>
+              <Link href="/incidents?status=MITIGATED" className={`${clickableMetricSubClass} bg-slate-50 border-slate-200`}>
                 <span className="text-[11px] text-emerald-400">Executed</span>
-                <div className="text-lg font-mono font-bold text-emerald-300">{aiOverview.executedActions}</div>
-              </div>
-              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
+                <div className="text-lg font-mono font-bold text-emerald-700">{aiOverview.executedActions}</div>
+              </Link>
+              <Link href="/incidents?status=OPEN" className={`${clickableMetricSubClass} bg-slate-50 border-slate-200`}>
                 <span className="text-[11px] text-rose-400">Rejected</span>
-                <div className="text-lg font-mono font-bold text-rose-300">{aiOverview.rejectedActions}</div>
-              </div>
+                <div className="text-lg font-mono font-bold text-rose-700">{aiOverview.rejectedActions}</div>
+              </Link>
             </div>
 
             {/* AI Insights & Pending Actions Queue */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-1">
               {/* Pending Human Approval Queue */}
-              <div className="p-4 rounded-xl bg-slate-950 border border-purple-900/40 space-y-3">
+              <div className="p-4 rounded-xl bg-slate-50 border border-purple-200 space-y-3">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <h4 className="text-xs font-bold text-purple-700 uppercase tracking-wider flex items-center gap-1.5">
                     <ShieldAlert className="h-3.5 w-3.5 text-purple-400" />
                     Human Review Queue
                   </h4>
-                  <span className="text-[10px] font-mono text-purple-400 px-1.5 py-0.5 rounded bg-purple-950 border border-purple-800">
+                  <Link
+                    href={firstPendingApprovalHref}
+                    className="text-[10px] font-mono text-purple-400 px-1.5 py-0.5 rounded bg-purple-50 border border-purple-200 hover:border-purple-300 transition-colors"
+                  >
                     {aiOverview.pendingApprovalActions} Pending
-                  </span>
+                  </Link>
                 </div>
 
                 {aiOverview.pendingApprovalActions === 0 ? (
-                  <div className="p-6 rounded-lg bg-slate-900/50 border border-slate-800 text-center space-y-1">
+                  <Link
+                    href="/incidents"
+                    className="block p-6 rounded-lg bg-slate-50 border border-slate-200 text-center space-y-1 hover:border-slate-300 hover:shadow-sm transition-all"
+                  >
                     <CheckCircle className="h-5 w-5 text-emerald-400 mx-auto" />
-                    <p className="text-xs text-slate-300 font-medium">All Proposed Actions Reviewed</p>
+                    <p className="text-xs text-slate-700 font-medium">All Proposed Actions Reviewed</p>
                     <p className="text-[11px] text-slate-500">
                       No automated mitigation actions currently pending operator sign-off.
                     </p>
-                  </div>
+                  </Link>
                 ) : (
                   <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
                     {aiOverview.recentInvestigations
                       ?.filter((inv: any) => inv.proposedAction?.status === "PENDING_APPROVAL")
                       .map((inv: any) => (
-                        <div
+                        <Link
                           key={inv._id}
-                          className="p-3 rounded-lg bg-slate-900 border border-purple-800/60 space-y-1.5"
+                          href={`/incidents/${getIncidentLinkTarget(inv.incidentId)}`}
+                          className="block p-3 rounded-lg bg-white border border-purple-200 space-y-1.5 hover:border-purple-300 hover:shadow-sm transition-all"
                         >
                           <div className="flex items-center justify-between text-xs">
-                            <span className="font-semibold text-purple-200">
+                            <span className="font-semibold text-purple-800">
                               {inv.proposedAction.type}
                             </span>
-                            <Link
-                              href={`/incidents/${inv.incidentId?._id || inv.incidentId}`}
-                              className="text-[10px] text-purple-300 hover:text-white flex items-center gap-1 font-mono bg-purple-950 px-2 py-0.5 rounded border border-purple-700"
-                            >
+                            <span className="text-[10px] text-purple-700 flex items-center gap-1 font-mono bg-purple-50 px-2 py-0.5 rounded border border-purple-300">
                               Review & Execute <ExternalLink className="h-2.5 w-2.5" />
-                            </Link>
+                            </span>
                           </div>
-                          <p className="text-[11px] text-slate-300 line-clamp-2">
+                          <p className="text-[11px] text-slate-700 line-clamp-2">
                             {inv.proposedAction.description || inv.proposedAction.reason}
                           </p>
-                          <div className="text-[10px] text-slate-500 font-mono">
-                            Incident: {inv.incidentId?.title || inv.incidentId}
-                          </div>
-                        </div>
+                          {inv.incidentId?.title && (
+                            <div className="text-[10px] text-slate-500">
+                              Incident: {inv.incidentId.title}
+                            </div>
+                          )}
+                        </Link>
                       ))}
                   </div>
                 )}
               </div>
 
               {/* Recent AI Investigations Stream */}
-              <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
-                <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
                   <Cpu className="h-3.5 w-3.5 text-blue-400" />
                   Recent Investigation Findings
                 </h4>
 
                 {aiOverview.recentInvestigations?.length === 0 ? (
-                  <p className="text-xs text-slate-500 text-center py-6">
+                  <Link
+                    href="/incidents"
+                    className="block text-xs text-slate-500 text-center py-6 hover:text-slate-700 transition-colors"
+                  >
                     No investigations performed yet. Trigger one from an incident detail page.
-                  </p>
+                  </Link>
                 ) : (
                   <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
                     {aiOverview.recentInvestigations?.map((inv: any) => (
                       <Link
                         key={inv._id}
-                        href={`/incidents/${inv.incidentId?._id || inv.incidentId}`}
-                        className="block p-2.5 rounded-lg bg-slate-900 border border-slate-800/80 hover:border-slate-700 transition-colors group"
+                        href={`/incidents/${getIncidentLinkTarget(inv.incidentId)}`}
+                        className="block p-2.5 rounded-lg bg-white border border-slate-200 hover:border-slate-300 transition-colors group"
                       >
                         <div className="flex items-center justify-between text-xs gap-2">
-                          <span className="font-semibold text-slate-200 group-hover:text-blue-400 line-clamp-1">
+                          <span className="font-semibold text-slate-800 group-hover:text-blue-400 line-clamp-1">
                             {inv.incidentId?.title || "Incident Investigation"}
                           </span>
-                          <span className="text-[10px] font-mono px-1.5 py-0.2 bg-slate-950 border border-slate-800 rounded text-slate-400 shrink-0">
+                          <span className="text-[10px] font-mono px-1.5 py-0.2 bg-slate-50 border border-slate-200 rounded text-slate-400 shrink-0">
                             {inv.confidence}% Conf
                           </span>
                         </div>
@@ -453,26 +544,31 @@ export default function OperationsOverviewPage() {
           </div>
 
           {/* Team Workload Distribution Table (Phase 8) */}
-          <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-4">
+          <div className="p-5 rounded-xl bg-white border border-slate-200 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+              <Link
+                href="/incidents"
+                className="text-sm font-bold text-slate-800 flex items-center gap-2 hover:text-purple-700 transition-colors"
+              >
                 <Users className="h-4 w-4 text-purple-400" />
                 Team Operational Workload
-              </h3>
+              </Link>
               <Link
                 href="/teams"
-                className="text-xs text-purple-400 hover:text-purple-300 flex items-center gap-1 font-medium"
+                className="text-xs text-purple-400 hover:text-purple-700 flex items-center gap-1 font-medium"
               >
                 Manage Teams <ArrowRight className="h-3 w-3" />
               </Link>
             </div>
 
             {data.teamWorkload?.length === 0 ? (
-              <p className="text-xs text-slate-500 text-center py-4">No team workload data available.</p>
+              <Link href="/incidents" className="block text-xs text-slate-500 text-center py-4 hover:text-slate-700 transition-colors">
+                No team workload data available.
+              </Link>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
-                  <thead className="border-b border-slate-800 text-slate-400 font-medium">
+                  <thead className="border-b border-slate-200 text-slate-400 font-medium">
                     <tr>
                       <th className="pb-2.5 font-semibold">Team Name</th>
                       <th className="pb-2.5 font-semibold">Service Responsibilities</th>
@@ -481,29 +577,55 @@ export default function OperationsOverviewPage() {
                       <th className="pb-2.5 font-semibold text-right">Capacity Status</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800/60">
+                  <tbody className="divide-y divide-slate-200">
                     {data.teamWorkload?.map((team: any) => {
+                      const teamId = String(team._id);
                       const isHighLoad = team.activeIncidents >= 5;
                       const hasCritical = team.criticalIncidents > 0;
+                      const teamQueueHref = `/incidents?teamId=${teamId}`;
+                      const teamCriticalHref = `/incidents?teamId=${teamId}&severities=P1,P2&excludeStatus=RESOLVED`;
                       return (
-                        <tr key={team._id} className="hover:bg-slate-950/40 transition-colors">
-                          <td className="py-2.5 font-semibold text-slate-200">{team.name}</td>
+                        <tr
+                          key={teamId}
+                          className="hover:bg-slate-50 transition-colors cursor-pointer"
+                          onClick={() => router.push(teamQueueHref)}
+                        >
+                          <td className="py-2.5 font-semibold text-slate-800">{team.name}</td>
                           <td className="py-2.5 text-slate-400">
                             <div className="flex flex-wrap gap-1">
                               {team.serviceResponsibility?.map((srv: string) => (
-                                <span
+                                <button
                                   key={srv}
-                                  className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800 text-[10px] font-mono text-slate-400"
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    router.push(
+                                      `/incidents?teamId=${teamId}&service=${encodeURIComponent(srv)}`,
+                                    );
+                                  }}
+                                  className="px-1.5 py-0.5 rounded bg-slate-50 border border-slate-200 text-[10px] font-mono text-slate-400 hover:border-slate-300 hover:text-slate-600 transition-colors"
                                 >
                                   {srv}
-                                </span>
+                                </button>
                               ))}
                             </div>
                           </td>
-                          <td className="py-2.5 font-mono text-center text-slate-200">
+                          <td
+                            className="py-2.5 font-mono text-center text-slate-800"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              router.push(teamQueueHref);
+                            }}
+                          >
                             {team.activeIncidents}
                           </td>
-                          <td className="py-2.5 font-mono text-center">
+                          <td
+                            className="py-2.5 font-mono text-center"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              router.push(teamCriticalHref);
+                            }}
+                          >
                             <span
                               className={
                                 team.criticalIncidents > 0 ? "text-rose-400 font-bold" : "text-slate-500"
@@ -512,14 +634,20 @@ export default function OperationsOverviewPage() {
                               {team.criticalIncidents}
                             </span>
                           </td>
-                          <td className="py-2.5 text-right">
+                          <td
+                            className="py-2.5 text-right"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              router.push(hasCritical ? teamCriticalHref : teamQueueHref);
+                            }}
+                          >
                             <span
                               className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
                                 hasCritical
-                                  ? "bg-rose-950/60 border-rose-800 text-rose-300"
+                                  ? "bg-rose-50 border-rose-200 text-rose-700"
                                   : isHighLoad
-                                  ? "bg-amber-950/60 border-amber-800 text-amber-300"
-                                  : "bg-emerald-950/60 border-emerald-800 text-emerald-300"
+                                  ? "bg-amber-50 border-amber-200 text-amber-700"
+                                  : "bg-emerald-50 border-emerald-200 text-emerald-700"
                               }`}
                             >
                               {hasCritical ? "Critical Alert" : isHighLoad ? "High Load" : "Nominal"}
@@ -537,45 +665,55 @@ export default function OperationsOverviewPage() {
           {/* Recent Operational Incidents & Live Activity Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Recent Incidents */}
-            <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-4">
+            <div className="p-5 rounded-xl bg-white border border-slate-200 space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
                   <Layers className="h-4 w-4 text-blue-400" />
                   Recent Operational Incidents
                 </h3>
                 <Link
                   href="/incidents"
-                  className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 font-medium"
+                  className="text-xs text-blue-400 hover:text-blue-700 flex items-center gap-1 font-medium"
                 >
                   View All <ArrowRight className="h-3 w-3" />
                 </Link>
               </div>
 
               <div className="space-y-2">
+                {data.recentIncidents?.length === 0 ? (
+                  <Link
+                    href="/incidents"
+                    className="block p-6 rounded-lg bg-slate-50 border border-slate-200 text-center text-xs text-slate-500 hover:border-slate-300 hover:shadow-sm transition-all"
+                  >
+                    No recent incidents. View the full incident queue.
+                  </Link>
+                ) : null}
                 {data.recentIncidents?.map((inc: any) => (
                   <Link
                     key={inc._id}
-                    href={`/incidents/${inc._id}`}
-                    className="block p-3 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 transition-colors group"
+                    href={`/incidents/${getIncidentRouteId(inc)}`}
+                    className="block p-3 rounded-lg bg-slate-50 border border-slate-200 hover:border-slate-300 transition-colors group"
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-semibold text-slate-200 group-hover:text-blue-400 line-clamp-1">
+                      <span className="text-xs font-semibold text-slate-800 group-hover:text-blue-400 line-clamp-1">
                         {inc.title}
                       </span>
                       <span
                         className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
                           inc.severity === "P1"
-                            ? "bg-rose-950 text-rose-300 border-rose-800"
+                            ? "bg-rose-50 text-rose-700 border-rose-200"
                             : inc.severity === "P2"
-                            ? "bg-amber-950 text-amber-300 border-amber-800"
-                            : "bg-blue-950 text-blue-300 border-blue-800"
+                            ? "bg-amber-50 text-amber-700 border-amber-200"
+                            : "bg-blue-50 text-blue-700 border-blue-200"
                         }`}
                       >
                         {inc.severity}
                       </span>
                     </div>
                     <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-1">
-                      <span className="font-mono text-slate-500">{inc.service}</span>
+                      <span className="font-mono text-slate-500">
+                        {(inc.services || []).join(", ") || "—"}
+                      </span>
                       <span>•</span>
                       <span>{new Date(inc.createdAt).toLocaleTimeString()}</span>
                     </div>
@@ -585,32 +723,34 @@ export default function OperationsOverviewPage() {
             </div>
 
             {/* Live Audit Activity */}
-            <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-4">
-              <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+            <div className="p-5 rounded-xl bg-white border border-slate-200 space-y-4">
+              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
                 <Activity className="h-4 w-4 text-emerald-400" />
                 Latest Audit Stream
               </h3>
 
               <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                {data.recentActivity?.length === 0 ? (
+                  <Link
+                    href="/incidents"
+                    className="block p-6 rounded-lg bg-slate-50 border border-slate-200 text-center text-xs text-slate-500 hover:border-slate-300 hover:shadow-sm transition-all"
+                  >
+                    No recent audit activity. View the incident queue.
+                  </Link>
+                ) : null}
                 {data.recentActivity?.map((ev: any) => (
-                  <div
+                  <Link
                     key={ev._id}
-                    className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 text-xs space-y-1"
+                    href={getAuditEventHref(ev)}
+                    className={clickableListItemClass}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="font-mono text-slate-200 font-semibold">{ev.action}</span>
+                      <span className="font-mono text-slate-800 font-semibold">{ev.action}</span>
                       <span className="text-[10px] text-slate-500">
                         {new Date(ev.timestamp).toLocaleTimeString()}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                      <span className="px-1 py-0.2 bg-slate-900 border border-slate-800 rounded">
-                        {ev.actorType}
-                      </span>
-                      <span>actor: {ev.actorId}</span>
-                      {ev.entity && <span>entity: {ev.entity}</span>}
-                    </div>
-                  </div>
+                  </Link>
                 ))}
               </div>
             </div>

@@ -15,6 +15,7 @@ import { AIProviderFactory } from './providers/ai-provider.factory';
 import { EventsGateway } from '../events/events.gateway';
 import { AuditService } from '../audit/audit.service';
 import { RedisService } from '../common/redis/redis.service';
+import { IncidentRefService } from '../incidents/incident-ref.service';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 
 describe('AIService - Investigation Pipeline & Controlled Action Execution', () => {
@@ -28,6 +29,7 @@ describe('AIService - Investigation Pipeline & Controlled Action Execution', () 
   let auditService: any;
   let redisService: any;
   let configService: any;
+  let incidentRefService: any;
 
   const incidentId = new Types.ObjectId();
   let mockIncidentDoc: any;
@@ -39,7 +41,7 @@ describe('AIService - Investigation Pipeline & Controlled Action Execution', () 
       description: 'High active connections',
       severity: 'P2',
       status: 'OPEN',
-      service: 'database-cluster',
+      services: ['database-cluster'],
       createdAt: new Date(1700000000000),
       updatedAt: new Date(1700000000000),
       version: `${incidentId.toString()}:1700000000000`,
@@ -56,9 +58,10 @@ describe('AIService - Investigation Pipeline & Controlled Action Execution', () 
   beforeEach(async () => {
     mockIncidentDoc = {
       _id: incidentId,
+      incidentNumber: 1,
       title: 'Database Spike',
       description: 'High active connections',
-      service: 'database-cluster',
+      services: ['database-cluster'],
       severity: IncidentSeverity.P2,
       status: IncidentStatus.INVESTIGATING,
       assigneeId: null,
@@ -86,6 +89,15 @@ describe('AIService - Investigation Pipeline & Controlled Action Execution', () 
 
     incidentModel = {
       findById: jest.fn().mockResolvedValue(mockIncidentDoc),
+    };
+
+    incidentRefService = {
+      findByRefOrThrow: jest.fn().mockImplementation(async (ref: string) => {
+        if (ref === incidentId.toString() || ref === 'INC-00001') {
+          return mockIncidentDoc;
+        }
+        throw new NotFoundException(`Incident ${ref} not found`);
+      }),
     };
 
     taskModel = jest.fn().mockImplementation((data) => ({
@@ -183,6 +195,7 @@ describe('AIService - Investigation Pipeline & Controlled Action Execution', () 
         { provide: AuditService, useValue: auditService },
         { provide: RedisService, useValue: redisService },
         { provide: ConfigService, useValue: configService },
+        { provide: IncidentRefService, useValue: incidentRefService },
       ],
     }).compile();
 
@@ -191,7 +204,9 @@ describe('AIService - Investigation Pipeline & Controlled Action Execution', () 
 
   describe('Investigation Enqueue & Idempotency', () => {
     it('should throw NotFoundException if incident does not exist', async () => {
-      incidentModel.findById.mockResolvedValueOnce(null);
+      incidentRefService.findByRefOrThrow.mockRejectedValueOnce(
+        new NotFoundException('Incident not found'),
+      );
       await expect(
         service.startInvestigation(new Types.ObjectId().toString(), { email: 'operator@example.com' }),
       ).rejects.toThrow(NotFoundException);

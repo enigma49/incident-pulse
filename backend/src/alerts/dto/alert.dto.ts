@@ -20,6 +20,10 @@ export class CreateAlertDto {
 
   @IsString()
   @IsOptional()
+  resource?: string;
+
+  @IsString()
+  @IsOptional()
   source?: string;
 
   @IsObject()

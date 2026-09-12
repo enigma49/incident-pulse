@@ -9,20 +9,23 @@ import { AIInvestigation } from '../ai/schemas/ai-investigation.schema';
 import { AuditService } from '../audit/audit.service';
 import { RedisService, CACHE_KEYS } from '../common/redis/redis.service';
 import { EventsGateway } from '../events/events.gateway';
+import { IncidentRefService } from './incident-ref.service';
 import { Types } from 'mongoose';
 
 describe('IncidentsService Caching & Invalidation', () => {
   let service: IncidentsService;
   let redisService: jest.Mocked<Partial<RedisService>>;
   let incidentModel: any;
+  let incidentRefService: any;
 
   const validId = new Types.ObjectId().toString();
   const mockIncident = {
     _id: validId,
+    incidentNumber: 7,
     title: 'Payment Gateway 504 Timeout',
     severity: IncidentSeverity.P1,
     status: IncidentStatus.OPEN,
-    service: 'payment-service',
+    services: ['payment-service'],
     save: jest.fn().mockImplementation(function () {
       return Promise.resolve(this);
     }),
@@ -51,6 +54,11 @@ describe('IncidentsService Caching & Invalidation', () => {
         }),
       }),
     });
+
+    incidentRefService = {
+      getNextIncidentNumber: jest.fn().mockResolvedValue(7),
+      findByRefOrThrow: jest.fn().mockResolvedValue(mockIncident),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -93,6 +101,7 @@ describe('IncidentsService Caching & Invalidation', () => {
             emitAIInvestigationEvent: jest.fn(),
           },
         },
+        { provide: IncidentRefService, useValue: incidentRefService },
       ],
     }).compile();
 
@@ -130,7 +139,7 @@ describe('IncidentsService Caching & Invalidation', () => {
   });
 
   it('should invalidate incident cache and dashboard cache on status change', async () => {
-    incidentModel.findById.mockResolvedValue({
+    incidentRefService.findByRefOrThrow.mockResolvedValue({
       ...mockIncident,
       status: IncidentStatus.OPEN,
       save: jest.fn().mockResolvedValue({ ...mockIncident, status: IncidentStatus.RESOLVED }),
@@ -143,7 +152,7 @@ describe('IncidentsService Caching & Invalidation', () => {
   });
 
   it('should invalidate incident cache on severity change', async () => {
-    incidentModel.findById.mockResolvedValue({
+    incidentRefService.findByRefOrThrow.mockResolvedValue({
       ...mockIncident,
       severity: IncidentSeverity.P3,
       save: jest.fn().mockResolvedValue({ ...mockIncident, severity: IncidentSeverity.P1 }),
@@ -160,7 +169,7 @@ describe('IncidentsService Caching & Invalidation', () => {
       title: 'New Incident',
       description: 'Test',
       severity: IncidentSeverity.P2,
-      service: 'auth-service',
+      services: ['auth-service'],
     };
     const user = { userId: 'u1', email: 'op@example.com', role: 'OPERATOR' };
 

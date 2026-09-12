@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "../../lib/api";
 import { useAuth } from "../../context/AuthContext";
 import { Incident, IncidentSeverity, IncidentStatus, Team } from "../../types";
@@ -22,11 +22,13 @@ import {
   Radio,
 } from "lucide-react";
 import { useSocket } from "../../context/SocketContext";
+import { getIncidentRouteId, formatIncidentId } from "../../lib/incident-id";
 
 export default function IncidentQueuePage() {
   const { user } = useAuth();
   const { socket, joinDashboard, leaveDashboard, reconnectEpoch, isConnected } = useSocket();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   // State
   const [incidents, setIncidents] = useState<Incident[]>([]);
@@ -41,23 +43,47 @@ export default function IncidentQueuePage() {
 
   // Filters
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<string>("");
-  const [severity, setSeverity] = useState<string>("");
-  const [service, setService] = useState<string>("");
-  const [teamId, setTeamId] = useState<string>("");
-  const [sortBy, setSortBy] = useState("createdAt");
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [status, setStatus] = useState<string>(() => searchParams.get("status") || "");
+  const [severity, setSeverity] = useState<string>(() => searchParams.get("severity") || "");
+  const [severities, setSeverities] = useState<string>(() => searchParams.get("severities") || "");
+  const [excludeStatus, setExcludeStatus] = useState<string>(() => searchParams.get("excludeStatus") || "");
+  const [service, setService] = useState<string>(() => searchParams.get("service") || "");
+  const [teamId, setTeamId] = useState<string>(() => searchParams.get("teamId") || "");
+  const [assigneeId, setAssigneeId] = useState<string>(() => searchParams.get("assigneeId") || "");
+  const [sortBy, setSortBy] = useState(() => searchParams.get("sortBy") || "createdAt");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">(() => {
+    const order = searchParams.get("sortOrder");
+    return order === "asc" || order === "desc" ? order : "desc";
+  });
 
   // Create Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [newSeverity, setNewSeverity] = useState<IncidentSeverity>("P2");
-  const [newService, setNewService] = useState("payment-service");
+  const [newServices, setNewServices] = useState<string[]>(["payment-service"]);
   const [newTeamId, setNewTeamId] = useState("");
   const [newTags, setNewTags] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState("");
+
+  const isAdmin = user?.role === "ADMIN";
+
+  const SERVICE_OPTIONS = [
+    "payment-service",
+    "auth-service",
+    "order-api",
+    "inventory-service",
+    "gateway",
+    "notification-worker",
+    "database-cluster",
+  ];
+
+  const toggleNewService = (svc: string) => {
+    setNewServices((prev) =>
+      prev.includes(svc) ? prev.filter((s) => s !== svc) : [...prev, svc],
+    );
+  };
 
   const fetchIncidents = useCallback(async () => {
     setLoading(true);
@@ -68,9 +94,12 @@ export default function IncidentQueuePage() {
         limit,
         search: search.trim() || undefined,
         status: status || undefined,
-        severity: severity || undefined,
+        severity: severities ? undefined : severity || undefined,
+        severities: severities || undefined,
+        excludeStatus: excludeStatus || undefined,
         service: service || undefined,
         teamId: teamId || undefined,
+        assigneeId: assigneeId || undefined,
         sortBy,
         sortOrder,
       });
@@ -82,11 +111,18 @@ export default function IncidentQueuePage() {
     } finally {
       setLoading(false);
     }
-  }, [page, limit, search, status, severity, service, teamId, sortBy, sortOrder]);
+  }, [page, limit, search, status, severity, severities, excludeStatus, service, teamId, assigneeId, sortBy, sortOrder]);
 
   useEffect(() => {
     fetchIncidents();
   }, [fetchIncidents]);
+
+  useEffect(() => {
+    const incidentRef = searchParams.get("incident");
+    if (incidentRef) {
+      router.replace(`/incidents/${incidentRef}`);
+    }
+  }, [searchParams, router]);
 
   useEffect(() => {
     api.teams.list().then(setTeams).catch(() => {});
@@ -106,7 +142,7 @@ export default function IncidentQueuePage() {
     if (!socket) return;
 
     const handleIncidentUpdate = (eventDesc: string) => (incidentData: any) => {
-      setLiveBanner(`${eventDesc}: "${incidentData.title || incidentData._id}"`);
+      setLiveBanner(`${eventDesc}: "${incidentData.title || "Incident updated"}"`);
       setTimeout(() => setLiveBanner(null), 4000);
       fetchIncidents();
     };
@@ -143,12 +179,18 @@ export default function IncidentQueuePage() {
         .map((t) => t.trim())
         .filter(Boolean);
 
+      if (newServices.length === 0) {
+        setCreateError("Select at least one service");
+        setIsCreating(false);
+        return;
+      }
+
       const created = await api.incidents.create({
         title: newTitle,
         description: newDescription,
         severity: newSeverity,
-        service: newService,
-        teamId: newTeamId || undefined,
+        services: newServices,
+        teamId: isAdmin && newTeamId ? newTeamId : undefined,
         tags: tagsArray,
       });
 
@@ -157,7 +199,7 @@ export default function IncidentQueuePage() {
       setNewDescription("");
       setNewTags("");
       fetchIncidents();
-      router.push(`/incidents/${created._id}`);
+      router.push(`/incidents/${getIncidentRouteId(created)}`);
     } catch (err: any) {
       setCreateError(err.message || "Failed to create incident");
     } finally {
@@ -168,30 +210,30 @@ export default function IncidentQueuePage() {
   const getSeverityBadge = (sev: IncidentSeverity) => {
     switch (sev) {
       case "P1":
-        return "bg-rose-950 text-rose-300 border-rose-800 font-bold";
+        return "bg-rose-50 text-rose-700 border-rose-200 font-bold";
       case "P2":
-        return "bg-amber-950 text-amber-300 border-amber-800 font-semibold";
+        return "bg-amber-50 text-amber-700 border-amber-200 font-semibold";
       case "P3":
-        return "bg-yellow-950 text-yellow-300 border-yellow-800";
+        return "bg-yellow-50 text-yellow-700 border-yellow-200";
       case "P4":
-        return "bg-blue-950 text-blue-300 border-blue-800";
+        return "bg-blue-50 text-blue-700 border-blue-200";
       default:
-        return "bg-slate-800 text-slate-300 border-slate-700";
+        return "bg-slate-100 text-slate-700 border-slate-300";
     }
   };
 
   const getStatusBadge = (stat: IncidentStatus) => {
     switch (stat) {
       case "OPEN":
-        return "bg-blue-950 text-blue-300 border-blue-800";
+        return "bg-blue-50 text-blue-700 border-blue-200";
       case "INVESTIGATING":
-        return "bg-purple-950 text-purple-300 border-purple-800 animate-pulse";
+        return "bg-purple-50 text-purple-700 border-purple-200 animate-pulse";
       case "MITIGATED":
-        return "bg-amber-950 text-amber-300 border-amber-800";
+        return "bg-amber-50 text-amber-700 border-amber-200";
       case "RESOLVED":
-        return "bg-emerald-950 text-emerald-300 border-emerald-800";
+        return "bg-emerald-50 text-emerald-700 border-emerald-200";
       default:
-        return "bg-slate-800 text-slate-300 border-slate-700";
+        return "bg-slate-100 text-slate-700 border-slate-300";
     }
   };
 
@@ -200,9 +242,9 @@ export default function IncidentQueuePage() {
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2.5">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2.5">
             Incident Queue
-            <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+            <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-slate-100 text-slate-400 border border-slate-300">
               {total} Total
             </span>
           </h1>
@@ -215,7 +257,7 @@ export default function IncidentQueuePage() {
           <button
             onClick={fetchIncidents}
             disabled={loading}
-            className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800 transition-colors"
+            className="p-2 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 transition-colors"
             title="Refresh Incidents"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
@@ -232,7 +274,7 @@ export default function IncidentQueuePage() {
 
       {/* Live Realtime Notification Banner */}
       {liveBanner && (
-        <div className="flex items-center gap-2.5 p-3 bg-blue-950/60 border border-blue-800/80 rounded-xl text-xs text-blue-200 shadow-lg animate-in fade-in">
+        <div className="flex items-center gap-2.5 p-3 bg-blue-50 border border-blue-200/80 rounded-xl text-xs text-blue-800 shadow-lg animate-in fade-in">
           <span className="h-2 w-2 rounded-full bg-blue-400 animate-ping" />
           <span className="font-semibold text-blue-400">Realtime Event:</span>
           <span>{liveBanner}</span>
@@ -240,7 +282,7 @@ export default function IncidentQueuePage() {
       )}
 
       {/* Filter & Search Bar */}
-      <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
+      <div className="p-4 rounded-xl bg-white border border-slate-200 space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
           {/* Search Input */}
           <div className="lg:col-span-2 relative">
@@ -253,7 +295,7 @@ export default function IncidentQueuePage() {
                 setSearch(e.target.value);
                 setPage(1);
               }}
-              className="w-full pl-9 pr-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              className="w-full pl-9 pr-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-sm text-slate-900 placeholder-slate-500 focus:outline-none focus:border-blue-500"
             />
           </div>
 
@@ -265,7 +307,7 @@ export default function IncidentQueuePage() {
                 setStatus(e.target.value);
                 setPage(1);
               }}
-              className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+              className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-500"
             >
               <option value="">All Statuses</option>
               <option value="OPEN">Open</option>
@@ -283,7 +325,7 @@ export default function IncidentQueuePage() {
                 setSeverity(e.target.value);
                 setPage(1);
               }}
-              className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+              className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-500"
             >
               <option value="">All Severities</option>
               <option value="P1">P1 - Critical</option>
@@ -301,7 +343,7 @@ export default function IncidentQueuePage() {
                 setService(e.target.value);
                 setPage(1);
               }}
-              className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+              className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-500"
             >
               <option value="">All Services</option>
               <option value="payment-service">payment-service</option>
@@ -322,7 +364,7 @@ export default function IncidentQueuePage() {
                 setTeamId(e.target.value);
                 setPage(1);
               }}
-              className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+              className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-500"
             >
               <option value="">All Teams</option>
               {teams.map((t) => (
@@ -335,9 +377,9 @@ export default function IncidentQueuePage() {
         </div>
 
         {/* Sort and Reset bar */}
-        <div className="flex flex-wrap items-center justify-between pt-2 border-t border-slate-800/80 text-xs text-slate-400 gap-2">
+        <div className="flex flex-wrap items-center justify-between pt-2 border-t border-slate-200 text-xs text-slate-400 gap-2">
           <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1 font-medium text-slate-300">
+            <span className="flex items-center gap-1 font-medium text-slate-700">
               <ArrowUpDown className="h-3.5 w-3.5" /> Sort by:
             </span>
             <button
@@ -346,7 +388,7 @@ export default function IncidentQueuePage() {
                 setSortOrder(sortOrder === "asc" ? "desc" : "asc");
               }}
               className={`px-2 py-1 rounded ${
-                sortBy === "createdAt" ? "bg-slate-800 text-white font-semibold" : "hover:text-white"
+                sortBy === "createdAt" ? "bg-blue-50 text-blue-700 font-semibold" : "hover:text-slate-900"
               }`}
             >
               Date {sortBy === "createdAt" && (sortOrder === "asc" ? "↑" : "↓")}
@@ -357,7 +399,7 @@ export default function IncidentQueuePage() {
                 setSortOrder(sortOrder === "asc" ? "desc" : "asc");
               }}
               className={`px-2 py-1 rounded ${
-                sortBy === "severity" ? "bg-slate-800 text-white font-semibold" : "hover:text-white"
+                sortBy === "severity" ? "bg-blue-50 text-blue-700 font-semibold" : "hover:text-slate-900"
               }`}
             >
               Severity {sortBy === "severity" && (sortOrder === "asc" ? "↑" : "↓")}
@@ -368,24 +410,27 @@ export default function IncidentQueuePage() {
                 setSortOrder(sortOrder === "asc" ? "desc" : "asc");
               }}
               className={`px-2 py-1 rounded ${
-                sortBy === "status" ? "bg-slate-800 text-white font-semibold" : "hover:text-white"
+                sortBy === "status" ? "bg-blue-50 text-blue-700 font-semibold" : "hover:text-slate-900"
               }`}
             >
               Status {sortBy === "status" && (sortOrder === "asc" ? "↑" : "↓")}
             </button>
           </div>
 
-          {(search || status || severity || service || teamId) && (
+          {(search || status || severity || severities || excludeStatus || service || teamId || assigneeId) && (
             <button
               onClick={() => {
                 setSearch("");
                 setStatus("");
                 setSeverity("");
+                setSeverities("");
+                setExcludeStatus("");
                 setService("");
                 setTeamId("");
+                setAssigneeId("");
                 setPage(1);
               }}
-              className="text-rose-400 hover:text-rose-300 underline font-medium"
+              className="text-rose-400 hover:text-rose-700 underline font-medium"
             >
               Reset Filters
             </button>
@@ -394,7 +439,7 @@ export default function IncidentQueuePage() {
       </div>
 
       {/* Incidents Table Container */}
-      <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden shadow-xl">
+      <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-xl">
         {loading ? (
           <div className="p-12 text-center text-slate-400 space-y-3">
             <RefreshCw className="h-6 w-6 animate-spin mx-auto text-blue-500" />
@@ -403,10 +448,10 @@ export default function IncidentQueuePage() {
         ) : error ? (
           <div className="p-12 text-center space-y-3">
             <AlertTriangle className="h-8 w-8 text-rose-400 mx-auto" />
-            <p className="text-sm font-semibold text-rose-300">{error}</p>
+            <p className="text-sm font-semibold text-rose-700">{error}</p>
             <button
               onClick={fetchIncidents}
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded"
+              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs rounded"
             >
               Retry
             </button>
@@ -414,16 +459,17 @@ export default function IncidentQueuePage() {
         ) : incidents.length === 0 ? (
           <div className="p-16 text-center space-y-3">
             <CheckCircle2 className="h-10 w-10 text-slate-600 mx-auto" />
-            <h3 className="text-base font-semibold text-slate-200">No Incidents Found</h3>
+            <h3 className="text-base font-semibold text-slate-800">No Incidents Found</h3>
             <p className="text-xs text-slate-500 max-w-sm mx-auto">
               No incident documents match your selected filters. Try broadening your query parameters.
             </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-slate-300">
-              <thead className="bg-slate-950 text-xs uppercase tracking-wider text-slate-400 border-b border-slate-800">
+            <table className="w-full text-left text-sm text-slate-700">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-400 border-b border-slate-200">
                 <tr>
+                  <th className="py-3 px-4">ID</th>
                   <th className="py-3 px-4">Severity</th>
                   <th className="py-3 px-4">Status</th>
                   <th className="py-3 px-4">Incident Title & Service</th>
@@ -433,13 +479,18 @@ export default function IncidentQueuePage() {
                   <th className="py-3 px-4 text-center">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/60">
+              <tbody className="divide-y divide-slate-200">
                 {incidents.map((inc) => (
                   <tr
                     key={inc._id}
-                    className="hover:bg-slate-800/40 transition-colors group cursor-pointer"
-                    onClick={() => router.push(`/incidents/${inc._id}`)}
+                    className="hover:bg-slate-100 transition-colors group cursor-pointer"
+                    onClick={() => router.push(`/incidents/${getIncidentRouteId(inc)}`)}
                   >
+                    <td className="py-3.5 px-4 whitespace-nowrap">
+                      <span className="text-xs font-mono font-semibold text-slate-600">
+                        {formatIncidentId(inc.incidentNumber)}
+                      </span>
+                    </td>
                     {/* Severity */}
                     <td className="py-3.5 px-4 whitespace-nowrap">
                       <span
@@ -464,19 +515,29 @@ export default function IncidentQueuePage() {
 
                     {/* Title & Service */}
                     <td className="py-3.5 px-4">
-                      <div className="font-semibold text-slate-100 group-hover:text-blue-400 transition-colors line-clamp-1">
+                      <div className="font-semibold text-slate-900 group-hover:text-blue-400 transition-colors line-clamp-1">
                         {inc.title}
                       </div>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                          {inc.service}
-                        </span>
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        {(inc.services || []).slice(0, 3).map((svc) => (
+                          <span
+                            key={svc}
+                            className="text-xs font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-300"
+                          >
+                            {svc}
+                          </span>
+                        ))}
+                        {(inc.services || []).length > 3 && (
+                          <span className="text-[10px] text-slate-400">
+                            +{(inc.services || []).length - 3}
+                          </span>
+                        )}
                         {inc.tags && inc.tags.length > 0 && (
                           <div className="flex gap-1">
                             {inc.tags.slice(0, 2).map((tag, idx) => (
                               <span
                                 key={idx}
-                                className="text-[10px] px-1 py-0.2 rounded bg-slate-900 text-slate-400 border border-slate-800"
+                                className="text-[10px] px-1 py-0.2 rounded bg-white text-slate-400 border border-slate-200"
                               >
                                 #{tag}
                               </span>
@@ -487,15 +548,15 @@ export default function IncidentQueuePage() {
                     </td>
 
                     {/* Team */}
-                    <td className="py-3.5 px-4 whitespace-nowrap text-xs text-slate-300">
+                    <td className="py-3.5 px-4 whitespace-nowrap text-xs text-slate-700">
                       {inc.teamId ? (inc.teamId as any).name : <span className="text-slate-500 italic">Unassigned</span>}
                     </td>
 
                     {/* Assignee */}
-                    <td className="py-3.5 px-4 whitespace-nowrap text-xs text-slate-300">
+                    <td className="py-3.5 px-4 whitespace-nowrap text-xs text-slate-700">
                       {inc.assigneeId ? (
                         <div className="flex items-center gap-1.5">
-                          <div className="h-5 w-5 rounded-full bg-slate-800 flex items-center justify-center text-[10px] font-bold text-blue-300">
+                          <div className="h-5 w-5 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold text-blue-700">
                             {inc.assigneeId.name.charAt(0)}
                           </div>
                           <span>{inc.assigneeId.name}</span>
@@ -518,8 +579,8 @@ export default function IncidentQueuePage() {
                     {/* Action */}
                     <td className="py-3.5 px-4 whitespace-nowrap text-center" onClick={(e) => e.stopPropagation()}>
                       <Link
-                        href={`/incidents/${inc._id}`}
-                        className="p-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white inline-flex items-center transition-colors"
+                        href={`/incidents/${getIncidentRouteId(inc)}`}
+                        className="p-1.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 inline-flex items-center transition-colors"
                         title="View Details"
                       >
                         <ExternalLink className="h-3.5 w-3.5" />
@@ -533,7 +594,7 @@ export default function IncidentQueuePage() {
         )}
 
         {/* Pagination Bar */}
-        <div className="flex flex-col sm:flex-row items-center justify-between px-4 py-3 bg-slate-950 border-t border-slate-800 text-xs text-slate-400 gap-3">
+        <div className="flex flex-col sm:flex-row items-center justify-between px-4 py-3 bg-slate-50 border-t border-slate-200 text-xs text-slate-400 gap-3">
           <div className="flex items-center gap-2">
             <span>Rows per page:</span>
             <select
@@ -542,7 +603,7 @@ export default function IncidentQueuePage() {
                 setLimit(Number(e.target.value));
                 setPage(1);
               }}
-              className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-slate-200 focus:outline-none"
+              className="bg-white border border-slate-200 rounded px-2 py-1 text-slate-800 focus:outline-none"
             >
               <option value={10}>10</option>
               <option value={25}>25</option>
@@ -557,7 +618,7 @@ export default function IncidentQueuePage() {
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page <= 1}
-              className="px-2.5 py-1.5 rounded bg-slate-900 border border-slate-800 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-slate-300 flex items-center gap-1"
+              className="px-2.5 py-1.5 rounded bg-white border border-slate-200 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed text-slate-700 flex items-center gap-1"
             >
               <ChevronLeft className="h-3.5 w-3.5" /> Previous
             </button>
@@ -567,7 +628,7 @@ export default function IncidentQueuePage() {
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={page >= totalPages}
-              className="px-2.5 py-1.5 rounded bg-slate-900 border border-slate-800 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-slate-300 flex items-center gap-1"
+              className="px-2.5 py-1.5 rounded bg-white border border-slate-200 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed text-slate-700 flex items-center gap-1"
             >
               Next <ChevronRight className="h-3.5 w-3.5" />
             </button>
@@ -577,47 +638,47 @@ export default function IncidentQueuePage() {
 
       {/* Create Incident Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="w-full max-w-lg p-6 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl space-y-4">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg p-6 bg-white border border-slate-200 rounded-xl shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
                 <Plus className="h-5 w-5 text-blue-500" />
                 Declare New Incident
               </h3>
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-slate-200 text-sm"
+                className="text-slate-400 hover:text-slate-800 text-sm"
               >
                 ✕
               </button>
             </div>
 
             {createError && (
-              <div className="p-3 bg-rose-950/70 border border-rose-800 rounded text-xs text-rose-300">
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded text-xs text-rose-700">
                 {createError}
               </div>
             )}
 
             <form onSubmit={handleCreateIncident} className="space-y-4">
               <div>
-                <label className="text-xs font-semibold text-slate-300">Title</label>
+                <label className="text-xs font-semibold text-slate-700">Title</label>
                 <input
                   type="text"
                   required
                   placeholder="e.g. Memory saturation on payment worker"
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded text-sm text-slate-900 focus:outline-none focus:border-blue-500"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-semibold text-slate-300">Severity</label>
+                  <label className="text-xs font-semibold text-slate-700">Severity</label>
                   <select
                     value={newSeverity}
                     onChange={(e) => setNewSeverity(e.target.value as IncidentSeverity)}
-                    className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+                    className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded text-sm text-slate-900 focus:outline-none focus:border-blue-500"
                   >
                     <option value="P1">P1 - Critical</option>
                     <option value="P2">P2 - High</option>
@@ -626,70 +687,89 @@ export default function IncidentQueuePage() {
                   </select>
                 </div>
 
-                <div>
-                  <label className="text-xs font-semibold text-slate-300">Service</label>
-                  <select
-                    value={newService}
-                    onChange={(e) => setNewService(e.target.value)}
-                    className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded text-sm text-slate-100 focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="payment-service">payment-service</option>
-                    <option value="auth-service">auth-service</option>
-                    <option value="order-api">order-api</option>
-                    <option value="inventory-service">inventory-service</option>
-                    <option value="gateway">gateway</option>
-                    <option value="notification-worker">notification-worker</option>
-                    <option value="database-cluster">database-cluster</option>
-                  </select>
+                {isAdmin ? (
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700">Team</label>
+                    <select
+                      value={newTeamId}
+                      onChange={(e) => setNewTeamId(e.target.value)}
+                      className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded text-sm text-slate-900 focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="">Select Team (Optional)</option>
+                      {teams.map((t) => (
+                        <option key={t._id} value={t._id}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700">Tags (comma-separated)</label>
+                    <input
+                      type="text"
+                      placeholder="database, oom, latency"
+                      value={newTags}
+                      onChange={(e) => setNewTags(e.target.value)}
+                      className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded text-sm text-slate-900 focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-700">Services</label>
+                <div className="mt-1 flex flex-wrap gap-2 p-2 bg-slate-50 border border-slate-200 rounded">
+                  {SERVICE_OPTIONS.map((svc) => {
+                    const selected = newServices.includes(svc);
+                    return (
+                      <button
+                        key={svc}
+                        type="button"
+                        onClick={() => toggleNewService(svc)}
+                        className={`text-xs font-mono px-2 py-1 rounded border transition-colors ${
+                          selected
+                            ? "bg-blue-50 text-blue-700 border-blue-300"
+                            : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+                        }`}
+                      >
+                        {svc}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              {isAdmin && (
                 <div>
-                  <label className="text-xs font-semibold text-slate-300">Team</label>
-                  <select
-                    value={newTeamId}
-                    onChange={(e) => setNewTeamId(e.target.value)}
-                    className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded text-sm text-slate-100 focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="">Select Team (Optional)</option>
-                    {teams.map((t) => (
-                      <option key={t._id} value={t._id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold text-slate-300">Tags (comma-separated)</label>
+                  <label className="text-xs font-semibold text-slate-700">Tags (comma-separated)</label>
                   <input
                     type="text"
                     placeholder="database, oom, latency"
                     value={newTags}
                     onChange={(e) => setNewTags(e.target.value)}
-                    className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+                    className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded text-sm text-slate-900 focus:outline-none focus:border-blue-500"
                   />
                 </div>
-              </div>
+              )}
 
               <div>
-                <label className="text-xs font-semibold text-slate-300">Description</label>
+                <label className="text-xs font-semibold text-slate-700">Description</label>
                 <textarea
                   required
                   rows={3}
                   placeholder="Detailed description of the observed anomaly or alert triggers..."
                   value={newDescription}
                   onChange={(e) => setNewDescription(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded text-sm text-slate-900 focus:outline-none focus:border-blue-500"
                 />
               </div>
 
-              <div className="flex justify-end gap-3 pt-3 border-t border-slate-800">
+              <div className="flex justify-end gap-3 pt-3 border-t border-slate-200">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-sm font-medium"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-sm font-medium"
                 >
                   Cancel
                 </button>

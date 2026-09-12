@@ -15,7 +15,7 @@ describe('OpenRouterProvider', () => {
       description: 'System down',
       severity: 'P1',
       status: 'OPEN',
-      service: 'auth-service',
+      services: ['auth-service'],
       createdAt: new Date(),
       updatedAt: new Date(),
       version: 'inc-1:100',

@@ -92,6 +92,20 @@ export const api = {
       request<any>(`/incidents/${id}/resolve`, {
         method: 'POST',
       }),
+    relate: (id: string, incidentId: string) =>
+      request<any>(`/incidents/${id}/relate`, {
+        method: 'POST',
+        body: JSON.stringify({ incidentId }),
+      }),
+    unrelate: (id: string, relatedId: string) =>
+      request<void>(`/incidents/${id}/relate/${relatedId}`, {
+        method: 'DELETE',
+      }),
+    merge: (id: string, targetIncidentId: string) =>
+      request<any>(`/incidents/${id}/merge`, {
+        method: 'POST',
+        body: JSON.stringify({ targetIncidentId }),
+      }),
   },
 
   comments: {
@@ -121,18 +135,71 @@ export const api = {
   },
 
   teams: {
-    list: () => request<any[]>('/teams'),
-    workload: () => request<any[]>('/teams/workload'),
-    create: (data: { name: string; description?: string; serviceResponsibility?: string[] }) =>
+    list: (includeArchived = false) =>
+      request<any[]>(`/teams${includeArchived ? '?includeArchived=true' : ''}`),
+    workload: (includeArchived = false) =>
+      request<any[]>(`/teams/workload${includeArchived ? '?includeArchived=true' : ''}`),
+    get: (id: string) => request<any>(`/teams/${id}`),
+    create: (data: {
+      name: string;
+      description?: string;
+      serviceResponsibility?: string[];
+      leadUserId?: string;
+    }) =>
       request<any>('/teams', {
         method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (id: string, data: {
+      name?: string;
+      description?: string;
+      serviceResponsibility?: string[];
+      leadUserId?: string | null;
+      isArchived?: boolean;
+    }) =>
+      request<any>(`/teams/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+    members: (id: string) => request<any[]>(`/teams/${id}/members`),
+    updateMembers: (id: string, data: { addUserIds?: string[]; removeUserIds?: string[] }) =>
+      request<any[]>(`/teams/${id}/members`, {
+        method: 'PATCH',
         body: JSON.stringify(data),
       }),
   },
 
   users: {
-    list: () => request<any[]>('/users'),
-    workload: () => request<any[]>('/users/workload'),
+    list: (includeInactive = false) =>
+      request<any[]>(`/users${includeInactive ? '?includeInactive=true' : ''}`),
+    workload: (includeInactive = false) =>
+      request<any[]>(`/users/workload${includeInactive ? '?includeInactive=true' : ''}`),
+    create: (data: {
+      name: string;
+      email: string;
+      password: string;
+      role?: 'ADMIN' | 'OPERATOR';
+      teamId?: string;
+    }) =>
+      request<any>('/users', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (id: string, data: {
+      name?: string;
+      role?: 'ADMIN' | 'OPERATOR';
+      teamId?: string | null;
+      isActive?: boolean;
+    }) =>
+      request<any>(`/users/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+    resetPassword: (id: string, password: string) =>
+      request<void>(`/users/${id}/password`, {
+        method: 'PATCH',
+        body: JSON.stringify({ password }),
+      }),
   },
 
   alerts: {

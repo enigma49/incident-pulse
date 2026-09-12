@@ -16,7 +16,7 @@ describe('MockAIProvider', () => {
         description: '504 responses spiking on payment endpoint',
         severity: 'P1',
         status: 'INVESTIGATING',
-        service: 'payment-service',
+        services: ['payment-service'],
         createdAt: new Date(),
         updatedAt: new Date(),
         version: 'inc-test-123:1700000000',

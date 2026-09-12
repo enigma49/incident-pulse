@@ -16,7 +16,7 @@ describe('AuthService', () => {
   const mockUser = {
     _id: '507f1f77bcf86cd799439011',
     email: 'operator@example.com',
-    name: 'Lead Operator',
+    name: 'Operator',
     role: UserRole.OPERATOR,
     passwordHash: '',
     isActive: true,

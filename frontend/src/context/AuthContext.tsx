@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { User } from "../types";
 import { api } from "../lib/api";
+import { AUTH_COOKIE_NAME } from "../lib/auth";
 
 interface AuthContextType {
   user: User | null;
@@ -10,10 +11,31 @@ interface AuthContextType {
   isLoading: boolean;
   login: (email: string, pass: string) => Promise<void>;
   logout: () => void;
-  switchDemoUser: (role: "ADMIN" | "OPERATOR") => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+const TOKEN_COOKIE_MAX_AGE = 60 * 60 * 24;
+
+function setAuthCookie(token: string) {
+  document.cookie = `${AUTH_COOKIE_NAME}=${encodeURIComponent(token)}; path=/; max-age=${TOKEN_COOKIE_MAX_AGE}; SameSite=Lax`;
+}
+
+function clearAuthCookie() {
+  document.cookie = `${AUTH_COOKIE_NAME}=; path=/; max-age=0`;
+}
+
+function persistAuth(accessToken: string, authUser: User) {
+  localStorage.setItem("token", accessToken);
+  localStorage.setItem("user", JSON.stringify(authUser));
+  setAuthCookie(accessToken);
+}
+
+function clearPersistedAuth() {
+  localStorage.removeItem("token");
+  localStorage.removeItem("user");
+  clearAuthCookie();
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -28,9 +50,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         setToken(savedToken);
         setUser(JSON.parse(savedUser));
+        setAuthCookie(savedToken);
       } catch {
-        localStorage.removeItem("token");
-        localStorage.removeItem("user");
+        clearPersistedAuth();
       }
     }
     setIsLoading(false);
@@ -40,8 +62,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(true);
     try {
       const res = await api.auth.login(email, pass);
-      localStorage.setItem("token", res.accessToken);
-      localStorage.setItem("user", JSON.stringify(res.user));
+      persistAuth(res.accessToken, res.user);
       setToken(res.accessToken);
       setUser(res.user);
     } finally {
@@ -50,18 +71,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
+    clearPersistedAuth();
     setToken(null);
     setUser(null);
-  };
-
-  const switchDemoUser = async (role: "ADMIN" | "OPERATOR") => {
-    if (role === "ADMIN") {
-      await login("admin@example.com", "Admin123!");
-    } else {
-      await login("operator@example.com", "Operator123!");
-    }
   };
 
   return (
@@ -72,7 +84,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         login,
         logout,
-        switchDemoUser,
       }}
     >
       {children}
@@ -87,4 +98,3 @@ export function useAuth() {
   }
   return context;
 }
-

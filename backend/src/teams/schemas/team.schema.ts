@@ -17,6 +17,9 @@ export class Team {
   @Prop({ type: Types.ObjectId, ref: 'User', default: null })
   leadUserId?: Types.ObjectId;
 
+  @Prop({ default: false })
+  isArchived: boolean;
+
   createdAt?: Date;
   updatedAt?: Date;
 }

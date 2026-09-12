@@ -5,6 +5,7 @@ import { Incident, IncidentSchema } from '../incidents/schemas/incident.schema';
 import { CommentsService } from './comments.service';
 import { CommentsController } from './comments.controller';
 import { AuditModule } from '../audit/audit.module';
+import { IncidentsModule } from '../incidents/incidents.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { AuditModule } from '../audit/audit.module';
       { name: Incident.name, schema: IncidentSchema },
     ]),
     AuditModule,
+    IncidentsModule,
   ],
   providers: [CommentsService],
   controllers: [CommentsController],

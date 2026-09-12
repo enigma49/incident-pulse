@@ -30,6 +30,14 @@ export class QueryIncidentsDto {
 
   @IsOptional()
   @IsString()
+  severities?: string;
+
+  @IsOptional()
+  @IsEnum(IncidentStatus)
+  excludeStatus?: IncidentStatus;
+
+  @IsOptional()
+  @IsString()
   service?: string;
 
   @IsOptional()

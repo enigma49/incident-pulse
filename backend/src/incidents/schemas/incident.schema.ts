@@ -19,6 +19,9 @@ export enum IncidentSeverity {
 
 @Schema({ timestamps: true })
 export class Incident {
+  @Prop({ required: true, unique: true, index: true, min: 1 })
+  incidentNumber: number;
+
   @Prop({ required: true, trim: true })
   title: string;
 
@@ -39,8 +42,18 @@ export class Incident {
   })
   severity: IncidentSeverity;
 
-  @Prop({ required: true, trim: true })
-  service: string;
+  /** One or more services impacted by this incident. */
+  @Prop({ type: [String], required: true, default: [] })
+  services: string[];
+
+  @Prop({ required: true, trim: true, index: true })
+  correlationKey: string;
+
+  @Prop({ type: [Types.ObjectId], ref: 'Incident', default: [] })
+  relatedIncidentIds: Types.ObjectId[];
+
+  @Prop({ type: Types.ObjectId, ref: 'Incident', default: null })
+  mergedIntoId?: Types.ObjectId;
 
   @Prop({ type: Types.ObjectId, ref: 'Team', default: null })
   teamId?: Types.ObjectId;
@@ -62,10 +75,10 @@ export const IncidentSchema = SchemaFactory.createForClass(Incident);
 
 // Strategic Indexes for Search, Filtering, Sorting, and Pagination
 IncidentSchema.index({ status: 1, severity: 1 });
-IncidentSchema.index({ service: 1, createdAt: -1 });
+IncidentSchema.index({ services: 1, createdAt: -1 });
 IncidentSchema.index({ teamId: 1, status: 1 });
 IncidentSchema.index({ assigneeId: 1, status: 1 });
 IncidentSchema.index({ createdAt: -1 });
 IncidentSchema.index({ updatedAt: -1 });
+IncidentSchema.index({ correlationKey: 1, status: 1, updatedAt: -1 });
 IncidentSchema.index({ title: 'text', description: 'text' });
-

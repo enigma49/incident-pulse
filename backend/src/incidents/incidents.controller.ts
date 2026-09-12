@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
   Query,
@@ -17,6 +18,8 @@ import {
   ChangeStatusDto,
   ChangeSeverityDto,
   AssignIncidentDto,
+  RelateIncidentDto,
+  MergeIncidentDto,
 } from './dto/incident.dto';
 import { QueryIncidentsDto } from './dto/query-incidents.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -86,6 +89,35 @@ export class IncidentsController {
   @HttpCode(HttpStatus.OK)
   async resolve(@Param('id') id: string, @CurrentUser() user: any) {
     return this.incidentsService.resolve(id, user);
+  }
+
+  @Post(':id/relate')
+  @HttpCode(HttpStatus.OK)
+  async relate(
+    @Param('id') id: string,
+    @Body() dto: RelateIncidentDto,
+    @CurrentUser() user: any,
+  ) {
+    return this.incidentsService.relate(id, dto, user);
+  }
+
+  @Delete(':id/relate/:relatedId')
+  async unrelate(
+    @Param('id') id: string,
+    @Param('relatedId') relatedId: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.incidentsService.unrelate(id, relatedId, user);
+  }
+
+  @Post(':id/merge')
+  @HttpCode(HttpStatus.OK)
+  async merge(
+    @Param('id') id: string,
+    @Body() dto: MergeIncidentDto,
+    @CurrentUser() user: any,
+  ) {
+    return this.incidentsService.merge(id, dto, user);
   }
 }
 

@@ -7,6 +7,7 @@ import { CommentsModule } from '../comments/comments.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { AuditModule } from '../audit/audit.module';
 import { AIModule } from '../ai/ai.module';
+import { CountersModule } from '../common/counters/counters.module';
 import { SeedService } from './seed.service';
 
 @Module({
@@ -19,6 +20,7 @@ import { SeedService } from './seed.service';
     TasksModule,
     AuditModule,
     AIModule,
+    CountersModule,
   ],
   providers: [SeedService],
   exports: [SeedService],

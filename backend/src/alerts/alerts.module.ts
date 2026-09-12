@@ -6,6 +6,7 @@ import { AlertsService } from './alerts.service';
 import { AlertsController } from './alerts.controller';
 import { AuditModule } from '../audit/audit.module';
 import { RedisModule } from '../common/redis/redis.module';
+import { IncidentsModule } from '../incidents/incidents.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { RedisModule } from '../common/redis/redis.module';
     ]),
     AuditModule,
     RedisModule,
+    IncidentsModule,
   ],
   providers: [AlertsService],
   controllers: [AlertsController],

@@ -3,23 +3,23 @@
 @tailwind utilities;
 
 :root {
-  --background: 224 71% 4%;
-  --foreground: 213 31% 91%;
-  --card: 224 71% 7%;
-  --card-foreground: 213 31% 91%;
+  --background: 0 0% 100%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
   --primary: 210 100% 50%;
-  --primary-foreground: 222 47% 11%;
-  --secondary: 222 47% 15%;
-  --secondary-foreground: 210 40% 98%;
-  --muted: 223 47% 14%;
-  --muted-foreground: 215 20.2% 65.1%;
-  --accent: 216 34% 17%;
-  --accent-foreground: 210 40% 98%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 210 40% 96%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 16% 47%;
+  --accent: 210 40% 96%;
+  --accent-foreground: 222 47% 11%;
   --destructive: 0 72% 51%;
   --destructive-foreground: 210 40% 98%;
-  --border: 216 34% 17%;
-  --input: 216 34% 17%;
-  --ring: 216 34% 17%;
+  --border: 214 32% 91%;
+  --input: 214 32% 91%;
+  --ring: 210 100% 50%;
   --radius: 0.5rem;
 }
 
@@ -28,4 +28,3 @@ body {
   background: hsl(var(--background));
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
 }
-

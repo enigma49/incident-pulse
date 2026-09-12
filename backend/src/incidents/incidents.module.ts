@@ -11,9 +11,12 @@ import {
   AIInvestigationSchema,
 } from '../ai/schemas/ai-investigation.schema';
 import { AuditModule } from '../audit/audit.module';
+import { CountersModule } from '../common/counters/counters.module';
+import { IncidentRefService } from './incident-ref.service';
 
 @Module({
   imports: [
+    CountersModule,
     MongooseModule.forFeature([
       { name: Incident.name, schema: IncidentSchema },
       { name: Alert.name, schema: AlertSchema },
@@ -23,8 +26,8 @@ import { AuditModule } from '../audit/audit.module';
     ]),
     AuditModule,
   ],
-  providers: [IncidentsService],
+  providers: [IncidentsService, IncidentRefService],
   controllers: [IncidentsController],
-  exports: [IncidentsService, MongooseModule],
+  exports: [IncidentsService, IncidentRefService, MongooseModule],
 })
 export class IncidentsModule {}

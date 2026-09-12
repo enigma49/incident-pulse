@@ -1,4 +1,5 @@
 import {
+  ArrayMinSize,
   IsEnum,
   IsNotEmpty,
   IsOptional,
@@ -20,9 +21,10 @@ export class CreateIncidentDto {
   @IsNotEmpty({ message: 'Severity is required' })
   severity: IncidentSeverity;
 
-  @IsString()
-  @IsNotEmpty({ message: 'Service name is required' })
-  service: string;
+  @IsArray()
+  @ArrayMinSize(1, { message: 'At least one service is required' })
+  @IsString({ each: true })
+  services: string[];
 
   @IsOptional()
   @IsString()
@@ -56,8 +58,10 @@ export class UpdateIncidentDto {
   severity?: IncidentSeverity;
 
   @IsOptional()
-  @IsString()
-  service?: string;
+  @IsArray()
+  @ArrayMinSize(1, { message: 'At least one service is required' })
+  @IsString({ each: true })
+  services?: string[];
 
   @IsOptional()
   @IsString()
@@ -95,3 +99,14 @@ export class AssignIncidentDto {
   teamId?: string;
 }
 
+export class RelateIncidentDto {
+  @IsString()
+  @IsNotEmpty()
+  incidentId: string;
+}
+
+export class MergeIncidentDto {
+  @IsString()
+  @IsNotEmpty()
+  targetIncidentId: string;
+}

@@ -31,6 +31,8 @@ import { AuditService } from '../audit/audit.service';
 import { ActorType } from '../audit/schemas/audit-event.schema';
 import { RedisService } from '../common/redis/redis.service';
 import { ApproveActionDto, RejectActionDto } from './dto/action-review.dto';
+import { IncidentRefService } from '../incidents/incident-ref.service';
+import { assertOperatorAssignmentAllowed } from '../incidents/incident-assignment.policy';
 
 export const INVESTIGATION_QUEUE_NAME = 'incident-investigation';
 
@@ -54,6 +56,7 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
     private auditService: AuditService,
     private redisService: RedisService,
     private configService: ConfigService,
+    private incidentRefService: IncidentRefService,
   ) {}
 
   async onModuleInit() {
@@ -137,12 +140,10 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
    * Enqueues an asynchronous investigation for an incident (idempotent, non-blocking)
    */
   async startInvestigation(incidentId: string, currentUser?: any) {
-    const incident = await this.incidentModel.findById(incidentId);
-    if (!incident) {
-      throw new NotFoundException(`Incident ${incidentId} not found`);
-    }
+    const incident = await this.incidentRefService.findByRefOrThrow(incidentId);
+    const objectId = incident._id.toString();
 
-    const incidentVersion = `${incident._id.toString()}:${incident.updatedAt ? incident.updatedAt.getTime() : incident.createdAt.getTime()}`;
+    const incidentVersion = `${objectId}:${incident.updatedAt ? incident.updatedAt.getTime() : incident.createdAt.getTime()}`;
 
     // 1. Idempotency Check
     const existingInvestigation = await this.aiInvestigationModel
@@ -174,7 +175,7 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
 
       // If pending in QUEUED/RUNNING, re-dispatch job to ensure queue processing
       const jobPayload = {
-        incidentId,
+        incidentId: objectId,
         investigationId: existingInvestigation._id.toString(),
         incidentVersion,
         requestedBy: currentUser?.userId || currentUser?.email || 'operator',
@@ -221,13 +222,13 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
     const investigationId = savedInvestigation._id.toString();
 
     // 3. Emit initial queued realtime event
-    this.eventsGateway.emitAIInvestigationEvent(incidentId, 'investigation_queued', {
+    this.eventsGateway.emitAIInvestigationEvent(objectId, 'investigation_queued', {
       investigationId,
       status: AIInvestigationStatus.QUEUED,
     });
 
     const jobPayload = {
-      incidentId,
+      incidentId: objectId,
       investigationId,
       incidentVersion,
       requestedBy: currentUser?.userId || currentUser?.email || 'operator',
@@ -436,15 +437,19 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
   }
 
   async getLatestInvestigation(incidentId: string): Promise<AIInvestigationDocument | null> {
+    const incident = await this.incidentRefService.findByRefOrThrow(incidentId);
+
     return this.aiInvestigationModel
-      .findOne({ incidentId: new Types.ObjectId(incidentId) })
+      .findOne({ incidentId: incident._id })
       .sort({ createdAt: -1 })
       .exec();
   }
 
   async getInvestigationHistory(incidentId: string): Promise<AIInvestigationDocument[]> {
+    const incident = await this.incidentRefService.findByRefOrThrow(incidentId);
+
     return this.aiInvestigationModel
-      .find({ incidentId: new Types.ObjectId(incidentId) })
+      .find({ incidentId: incident._id })
       .sort({ createdAt: -1 })
       .limit(10)
       .exec();
@@ -462,14 +467,8 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
     investigationId?: string,
     dto?: ApproveActionDto,
   ) {
-    if (!Types.ObjectId.isValid(incidentId)) {
-      throw new BadRequestException(`Invalid incident ID format: ${incidentId}`);
-    }
-
-    const incident = await this.incidentModel.findById(incidentId);
-    if (!incident) {
-      throw new NotFoundException(`Incident ${incidentId} not found`);
-    }
+    const incident = await this.incidentRefService.findByRefOrThrow(incidentId);
+    const objectId = incident._id.toString();
 
     let investigation: AIInvestigationDocument | null = null;
     if (investigationId) {
@@ -622,6 +621,18 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
           );
         }
 
+        assertOperatorAssignmentAllowed(
+          currentUser,
+          {
+            assigneeId: targetAssigneeId,
+            teamId: targetTeamId,
+          },
+          {
+            context: 'assign',
+            currentAssigneeId: incident.assigneeId?.toString() || null,
+          },
+        );
+
         const sameAssignee =
           !targetAssigneeId || incident.assigneeId?.toString() === targetAssigneeId;
         const sameTeam = !targetTeamId || incident.teamId?.toString() === targetTeamId;
@@ -701,10 +712,10 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
     });
 
     // Step 5: Redis Cache Invalidation
-    await this.redisService.invalidateIncident(incidentId);
+    await this.redisService.invalidateIncident(objectId);
 
     // Step 6: Realtime Gateway Broadcast
-    this.eventsGateway.emitAIInvestigationEvent(incidentId, 'action_executed', {
+    this.eventsGateway.emitAIInvestigationEvent(objectId, 'action_executed', {
       investigationId: investigation._id.toString(),
       action: investigation.proposedAction,
       executionResult,
@@ -733,14 +744,8 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
     dto?: RejectActionDto,
     investigationId?: string,
   ) {
-    if (!Types.ObjectId.isValid(incidentId)) {
-      throw new BadRequestException(`Invalid incident ID format: ${incidentId}`);
-    }
-
-    const incident = await this.incidentModel.findById(incidentId);
-    if (!incident) {
-      throw new NotFoundException(`Incident ${incidentId} not found`);
-    }
+    const incident = await this.incidentRefService.findByRefOrThrow(incidentId);
+    const objectId = incident._id.toString();
 
     let investigation: AIInvestigationDocument | null = null;
     if (investigationId) {
@@ -790,9 +795,9 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
-    await this.redisService.invalidateIncident(incidentId);
+    await this.redisService.invalidateIncident(objectId);
 
-    this.eventsGateway.emitAIInvestigationEvent(incidentId, 'action_rejected', {
+    this.eventsGateway.emitAIInvestigationEvent(objectId, 'action_rejected', {
       investigationId: investigation._id.toString(),
       action: investigation.proposedAction,
       reason: rejectionReason,

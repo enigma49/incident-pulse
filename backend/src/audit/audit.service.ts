@@ -54,7 +54,7 @@ export class AuditService {
       .find()
       .sort({ timestamp: -1 })
       .limit(limit)
-      .populate('incidentId', 'title severity status')
+      .populate('incidentId', 'title severity status incidentNumber')
       .exec();
   }
 }

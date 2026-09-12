@@ -17,9 +17,15 @@ export interface Team {
   name: string;
   description: string;
   serviceResponsibility: string[];
-  leadUserId?: any;
+  leadUserId?: User | string | null;
+  isArchived?: boolean;
   activeIncidents?: number;
   criticalIncidents?: number;
+  memberCount?: number;
+}
+
+export interface TeamDetails extends Team {
+  members?: User[];
 }
 
 export type IncidentStatus = 'OPEN' | 'INVESTIGATING' | 'MITIGATED' | 'RESOLVED';
@@ -27,11 +33,16 @@ export type IncidentSeverity = 'P1' | 'P2' | 'P3' | 'P4';
 
 export interface Incident {
   _id: string;
+  incidentNumber: number;
   title: string;
   description: string;
   status: IncidentStatus;
   severity: IncidentSeverity;
-  service: string;
+  services: string[];
+  correlationKey?: string;
+  relatedIncidentIds?: string[];
+  relatedIncidents?: Incident[];
+  mergedIntoId?: string | Incident | null;
   teamId?: Team | null;
   assigneeId?: User | null;
   tags: string[];
@@ -46,6 +57,8 @@ export interface Alert {
   description: string;
   severity: string;
   service: string;
+  resource?: string;
+  correlationKey?: string;
   timestamp: string;
   source: string;
   rawPayload: Record<string, any>;

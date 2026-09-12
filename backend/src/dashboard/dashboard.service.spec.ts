@@ -20,18 +20,18 @@ describe('DashboardService Caching & Aggregations (Phase 8)', () => {
       set: jest.fn().mockResolvedValue(undefined),
     };
 
+    const mockQuery: any = {
+      populate: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue([]),
+    };
+
     incidentModel = {
       countDocuments: jest.fn().mockResolvedValue(50),
       aggregate: jest.fn().mockResolvedValue([{ _id: 'P1', count: 5 }]),
       find: jest.fn().mockReturnValue({
         sort: jest.fn().mockReturnValue({
-          limit: jest.fn().mockReturnValue({
-            populate: jest.fn().mockReturnValue({
-              populate: jest.fn().mockReturnValue({
-                exec: jest.fn().mockResolvedValue([]),
-              }),
-            }),
-          }),
+          limit: jest.fn().mockReturnValue(mockQuery),
         }),
       }),
     };

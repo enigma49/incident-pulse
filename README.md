@@ -88,8 +88,8 @@ The platform comes pre-seeded with realistic operational data and standardized d
 
 | Role | Email | Password | Permissions |
 |------|-------|----------|-------------|
-| **Administrator** | `admin@example.com` | `Admin123!` | Full system access, team/user management, incident operations, approval |
-| **Lead Operator** | `operator@example.com` | `Operator123!` | Incident operations, alerts, comments, tasks, AI investigations |
+| **Administrator** | `admin@example.com` | `Admin123!` | Full system access, team/user management, password reset, unrestricted incident assignment, AI action approvals |
+| **Operator** | `operator@example.com` | `Operator123!` | Incident operations, alerts, comments, tasks, self-assignment, AI investigations & approvals |
 | **Operator 2** | `sarah.chen@example.com` | `Operator123!` | Incident operations, triage & investigation |
 | **Operator 3** | `alex.rivera@example.com` | `Operator123!` | Incident operations, triage & investigation |
 | **Operator 4** | `david.kim@example.com` | `Operator123!` | Incident operations, triage & investigation |
@@ -139,12 +139,14 @@ npm run dev
 
 ## Key Modules & Features
 
-1. **Authentication & RBAC**: JWT Bearer auth with Refresh Tokens, `@Roles()` decorator and role guards (`ADMIN`, `OPERATOR`).
-2. **Operations Dashboard**: Aggregated incident metrics, severity breakdown, active workloads, and recent activity.
-3. **Incident Queue**: Filterable, sortable, paginated incident management powered by MongoDB native database queries.
-4. **Alert Correlation Engine**: Deterministic correlation mapping incoming alerts to existing active incidents or spawning new ones.
-5. **Real-time Collaboration**: Socket.IO incident and dashboard rooms with automatic client reconnect reconciliation.
-6. **AI Investigation Workflow**: BullMQ asynchronous processing, grounded context gathering via controlled tools, Zod-validated findings, and human-in-the-loop approval.
+1. **Authentication & RBAC**: JWT Bearer auth with Refresh Tokens, `@Roles()` decorator, strict role guards (`ADMIN`, `OPERATOR`), and client-side route middleware protection.
+2. **Operations Dashboard**: Aggregated incident velocity metrics, severity breakdown, active team workloads, and recent activity timeline.
+3. **Incident Queue & Human-Readable IDs**: Filterable, sortable, paginated incident management powered by MongoDB native database queries, featuring zero-padded sequential IDs (`INC-00001`) and dual routing support (`INC-XXXXX` or ObjectId).
+4. **Deterministic Alert Correlation & Escalation**: Intelligent cross-service correlation mapping alerts to multi-service incidents (`services[]`), with frequency-based automatic severity escalation (`P3`, `P2`, `P1`).
+5. **Operator Assignment Policy Guardrails**: Enforced self-assignment boundaries allowing operators to take ownership or unassign themselves, while reserving cross-operator reassignment and team transfers exclusively for Admins.
+6. **Real-time Collaboration**: Socket.IO incident and dashboard rooms with automatic client reconnect epoch reconciliation.
+7. **AI Investigation Workflow**: BullMQ asynchronous processing, grounded telemetry gathering via controlled tools, Zod-validated findings, and human-in-the-loop approval.
+8. **Team & User Administration**: Full enterprise team modeling with service responsibilities, team leads (`leadUserId`), team archiving, user provisioning, and credential management.
 
 ---
 
@@ -203,15 +205,22 @@ The platform provides high-throughput alert ingestion with intelligent grouping 
 ### Ingestion Flow (`POST /alerts`)
 1. **Deduplication Fingerprinting (5-minute sliding window)**:
    - Computes deterministic SHA-256 fingerprint: `SHA256(service:title:source)`.
-   - If an alert with the same fingerprint was ingested within the past 5 minutes, increments the existing alert's `count` and updates `lastSeenAt` without generating redundant alerts or incidents.
-2. **Deterministic Incident Correlation (30-minute clustering window)**:
-   - Queries MongoDB for an active non-resolved incident (`status != 'RESOLVED'`) matching the alert's `service` updated within the last 30 minutes.
-   - **Correlate to Existing**: If matched, associates the alert to the active incident (`status = 'CORRELATED'`), logs an audit event, invalidates Redis incident cache, and broadcasts `alert:associated`.
-   - **Automatic Incident Creation**: If no active incident is found within 30 minutes, spawns a new incident titled `[Incident] {alert.title} ({alert.service})` with status `OPEN`, assigns the alert, logs an audit trail, invalidates dashboard cache, and broadcasts `incident:created` and `alert:associated`.
-3. **Severity Escalation Policy**:
-   - If an alert correlated to an active incident has a higher severity than the incident (e.g. incoming alert is `P1` / `CRITICAL` while incident is `P3`), the incident is escalated to the higher severity.
-   - The escalation records an audit event (`SEVERITY_CHANGED`, reason: `ALERT_CORRELATION_ESCALATION`) and broadcasts `incident:severity_changed` across all connected clients.
-4. **Manual Association & Unassociation**:
+   - If an alert with the same fingerprint was ingested within the past 5 minutes, increments the existing alert's `count` and updates `lastSeenAt`.
+   - **Frequency-Based Escalation**: If recurring alerts reach frequency thresholds, the alert and any linked active incident automatically escalate:
+     - Count $\ge 5 \implies$ escalated to `P3`
+     - Count $\ge 15 \implies$ escalated to `P2`
+     - Count $\ge 30 \implies$ escalated to `P1`
+2. **Multi-Service Deterministic Correlation (30-minute clustering window)**:
+   - Evaluates active non-resolved incidents (`status != 'RESOLVED'`) matching the alert's service or correlation key updated within the last 30 minutes.
+   - **Multi-Service Association**: Alerts originating from distinct microservices that share a root-cause correlation key are clustered under a single incident, tracking all affected services (`services: string[]`). Incident titles dynamically reflect all impacted services (e.g. `[Incident] Database Saturation (auth-service, gateway)`).
+   - **Correlate to Existing**: Associates the alert to the active incident (`status = 'CORRELATED'`), merges affected services, logs an audit event, invalidates Redis incident cache, and broadcasts `alert:associated`.
+   - **Automatic Incident Creation**: If no active incident matches within 30 minutes, spawns a new incident with atomic sequential ID (e.g., `INC-00042`), sets `status = 'OPEN'`, associates the alert, logs an audit trail, invalidates dashboard cache, and broadcasts `incident:created` and `alert:associated`.
+3. **Payload Sanitization & Fallback**:
+   - The alert description is optional; if omitted, it automatically defaults to the alert title or `'No description provided.'`.
+4. **Severity Escalation Policy**:
+   - If an alert correlated to an active incident has a higher severity than the incident (e.g. incoming alert is `P1` while incident is `P3`), or hits a frequency threshold, the incident is escalated to the higher severity.
+   - The escalation records an audit event (`SEVERITY_CHANGED`, reason: `ALERT_FREQUENCY_ESCALATION` or `ALERT_CORRELATION_ESCALATION`) and broadcasts `incident:severity_changed` across all connected clients.
+5. **Manual Association & Unassociation**:
    - Responders can manually associate unassigned alerts to any active incident (`PATCH /alerts/:id/associate`) or detach them (`PATCH /alerts/:id/unassociate`).
 
 ---
@@ -377,7 +386,7 @@ IncidentPulse incorporates multi-layered hardening across security, network resi
 - **DTO Whitelisting**: Global `ValidationPipe` with `whitelist: true` and `forbidNonWhitelisted: true` strips unexpected payload properties and prevents parameter injection.
 
 ### 6. Automated Verification Matrix
-- **Backend Unit Tests**: 14 test suites, 87 unit tests passing (100% pass rate).
+- **Backend Unit Tests**: 15 test suites, 114 unit tests passing (100% pass rate).
 - **ESLint & TypeScript**: Zero ESLint warnings/errors; strict TypeScript compilation.
 
 ---
@@ -390,7 +399,7 @@ Follow these instructions to verify the complete incident lifecycle either throu
 
 1. **Sign In**:
    - Navigate to `http://localhost:3000/login`.
-   - Sign in as **Lead Operator** (`operator@example.com` / `Operator123!`) or **Administrator** (`admin@example.com` / `Admin123!`).
+   - Sign in as **Operator** (`operator@example.com` / `Operator123!`) or **Administrator** (`admin@example.com` / `Admin123!`).
 2. **Operations Dashboard (`/`)**:
    - Observe live operational metrics: Active Incidents, Critical P1/P2 load, Mitigated count, and AI Approval queue.
    - Note the Team Workload distribution and the recent AI investigation stream.
@@ -477,20 +486,39 @@ curl -s -X GET "http://localhost:4000/dashboard/overview" \
 ### Incidents (`/incidents`)
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
-| `GET` | `/incidents` | List incidents with search, filtering (status, severity, service), sorting, and pagination | Bearer JWT |
-| `POST` | `/incidents` | Manually report a new incident | Bearer JWT |
-| `GET` | `/incidents/:id` | Fetch full composite incident detail (cached with 15s TTL) | Bearer JWT |
-| `PATCH` | `/incidents/:id` | Update incident metadata (title, summary, status, severity) | Bearer JWT |
-| `PATCH` | `/incidents/:id/assign` | Update incident team and responder assignment | Bearer JWT |
-| `POST` | `/incidents/:id/comments` | Add responder triage comment | Bearer JWT |
-| `POST` | `/incidents/:id/tasks` | Create a mitigation checklist task | Bearer JWT |
-| `PATCH` | `/incidents/:id/tasks/:taskId` | Toggle task completion or edit title/description | Bearer JWT |
-| `DELETE` | `/incidents/:id/tasks/:taskId` | Remove a checklist task | Bearer JWT |
+| `GET` | `/incidents` | List incidents with search, filtering (status, severity, services), sorting, and pagination | Bearer JWT |
+| `POST` | `/incidents` | Manually report a new incident (assigns sequential `INC-XXXXX` ID) | Bearer JWT |
+| `GET` | `/incidents/:ref` | Fetch composite incident detail by MongoDB ObjectId or sequence ID (`INC-00001`) | Bearer JWT |
+| `PATCH` | `/incidents/:ref` | Update incident metadata (title, summary, status, severity, services) | Bearer JWT |
+| `PATCH` | `/incidents/:ref/assign` | Update incident team and responder assignment (Operators: self-assign only; Admin: unrestricted) | Bearer JWT |
+| `POST` | `/incidents/:ref/comments` | Add responder triage comment | Bearer JWT |
+| `POST` | `/incidents/:ref/tasks` | Create a mitigation checklist task | Bearer JWT |
+| `PATCH` | `/tasks/:taskId` | Toggle task completion or edit title/description | Bearer JWT |
+| `DELETE` | `/tasks/:taskId` | Remove a checklist task | Bearer JWT |
+
+### Teams (`/teams`)
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| `GET` | `/teams` | List active teams (supports `?includeArchived=true`) | Bearer JWT |
+| `POST` | `/teams` | Create new team with service responsibilities and team lead (`leadUserId`) | `ADMIN` |
+| `PATCH` | `/teams/:id` | Update team details, service responsibilities, lead, or archive state | `ADMIN` |
+| `GET` | `/teams/workload` | Aggregate active and critical incident workloads per team | Bearer JWT |
+| `GET` | `/teams/:id/members` | Retrieve active member roster for team | Bearer JWT |
+| `PATCH` | `/teams/:id/members` | Batch add or remove users from team (`addUserIds`, `removeUserIds`) | `ADMIN` |
+
+### Users (`/users`)
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| `GET` | `/users` | List users with populated team associations (supports `?includeInactive=true`) | Bearer JWT |
+| `POST` | `/users` | Provision user with email, name, temporary password, role (`ADMIN`/`OPERATOR`), and team | `ADMIN` |
+| `PATCH` | `/users/:id` | Update user profile, role, team assignment, or active status | `ADMIN` |
+| `PATCH` | `/users/:id/password` | Administrative password reset | `ADMIN` |
+| `GET` | `/users/workload` | Aggregate assigned incident workload counts per responder | Bearer JWT |
 
 ### Alerts (`/alerts`)
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
-| `POST` | `/alerts` | Ingest alert with SHA-256 deduplication and 30-minute correlation | Bearer JWT |
+| `POST` | `/alerts` | Ingest alert with SHA-256 deduplication, 30m correlation window, and frequency escalation | Bearer JWT |
 | `GET` | `/alerts` | List all ingested alerts with status and service filters | Bearer JWT |
 | `PATCH` | `/alerts/:id/associate` | Manually link unassigned alert to an active incident | Bearer JWT |
 | `PATCH` | `/alerts/:id/unassociate` | Detach alert from an incident | Bearer JWT |

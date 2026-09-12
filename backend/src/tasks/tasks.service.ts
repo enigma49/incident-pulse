@@ -8,6 +8,7 @@ import { ActorType } from '../audit/schemas/audit-event.schema';
 import { CreateTaskDto, UpdateTaskDto } from './dto/task.dto';
 import { RedisService } from '../common/redis/redis.service';
 import { EventsGateway } from '../events/events.gateway';
+import { IncidentRefService } from '../incidents/incident-ref.service';
 
 @Injectable()
 export class TasksService {
@@ -19,6 +20,7 @@ export class TasksService {
     private auditService: AuditService,
     private redisService: RedisService,
     private eventsGateway: EventsGateway,
+    private incidentRefService: IncidentRefService,
   ) {}
 
   async create(
@@ -26,20 +28,15 @@ export class TasksService {
     dto: CreateTaskDto,
     currentUser: any,
   ): Promise<TaskDocument> {
-    if (!Types.ObjectId.isValid(incidentId)) {
-      throw new BadRequestException(`Invalid incident ID format: ${incidentId}`);
-    }
     if (dto.assigneeId && !Types.ObjectId.isValid(dto.assigneeId)) {
       throw new BadRequestException(`Invalid assigneeId format: ${dto.assigneeId}`);
     }
 
-    const incident = await this.incidentModel.findById(incidentId);
-    if (!incident) {
-      throw new NotFoundException(`Incident ${incidentId} not found`);
-    }
+    const incident = await this.incidentRefService.findByRefOrThrow(incidentId);
+    const objectId = incident._id.toString();
 
     const task = new this.taskModel({
-      incidentId: new Types.ObjectId(incidentId),
+      incidentId: incident._id,
       title: dto.title,
       description: dto.description || '',
       status: dto.status || TaskStatus.PENDING,
@@ -59,23 +56,21 @@ export class TasksService {
     });
 
     // Invalidate incident cache
-    await this.redisService.invalidateIncident(incidentId);
+    await this.redisService.invalidateIncident(objectId);
 
     const populated = await saved.populate('assigneeId', 'name email role');
 
     // Emit realtime event
-    this.eventsGateway.emitTaskCreated(incidentId, populated);
+    this.eventsGateway.emitTaskCreated(objectId, populated);
 
     return populated;
   }
 
   async findByIncident(incidentId: string): Promise<TaskDocument[]> {
-    if (!Types.ObjectId.isValid(incidentId)) {
-      throw new BadRequestException(`Invalid incident ID format: ${incidentId}`);
-    }
+    const incident = await this.incidentRefService.findByRefOrThrow(incidentId);
 
     return this.taskModel
-      .find({ incidentId: new Types.ObjectId(incidentId) })
+      .find({ incidentId: incident._id })
       .populate('assigneeId', 'name email role')
       .sort({ createdAt: 1 })
       .exec();

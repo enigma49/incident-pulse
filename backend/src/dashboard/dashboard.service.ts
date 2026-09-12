@@ -99,7 +99,10 @@ export class DashboardService {
       this.incidentModel.countDocuments({ status: IncidentStatus.RESOLVED }),
       this.incidentModel.aggregate([{ $group: { _id: '$severity', count: { $sum: 1 } } }]),
       this.incidentModel.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
-      this.incidentModel.aggregate([{ $group: { _id: '$service', count: { $sum: 1 } } }]),
+      this.incidentModel.aggregate([
+        { $unwind: { path: '$services', preserveNullAndEmptyArrays: true } },
+        { $group: { _id: '$services', count: { $sum: 1 } } },
+      ]),
       this.teamModel.find().exec(),
       this.incidentModel.aggregate([
         {
@@ -137,12 +140,13 @@ export class DashboardService {
         .find()
         .sort({ createdAt: -1 })
         .limit(5)
-        .populate('incidentId', 'title service severity status')
+        .populate('incidentId', 'title services severity status incidentNumber')
         .exec(),
       this.incidentModel
         .find()
         .sort({ createdAt: -1 })
         .limit(5)
+        .select('title services severity status incidentNumber createdAt')
         .populate('teamId', 'name')
         .populate('assigneeId', 'name')
         .exec(),

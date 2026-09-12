@@ -23,6 +23,12 @@ export class Alert {
   @Prop({ required: true, trim: true })
   service: string;
 
+  @Prop({ default: null, trim: true })
+  resource?: string;
+
+  @Prop({ default: null, trim: true })
+  correlationKey?: string;
+
   @Prop({ required: true, default: () => new Date() })
   timestamp: Date;
 
@@ -61,4 +67,5 @@ AlertSchema.index({ service: 1, timestamp: -1 });
 AlertSchema.index({ incidentId: 1 });
 AlertSchema.index({ status: 1 });
 AlertSchema.index({ fingerprint: 1, timestamp: -1 });
+AlertSchema.index({ correlationKey: 1 });
 

@@ -10,8 +10,9 @@ export class MockAIProvider implements AIProvider {
 
   async investigate(context: GroundedContext): Promise<AIProviderResponse> {
     const startTime = Date.now();
+    const serviceLabel = (context.incident.services || []).join(', ') || 'unknown-service';
     this.logger.log(
-      `[MockAIProvider] Generating deterministic grounded investigation for incident ${context.incident.id} (${context.incident.service})`,
+      `[MockAIProvider] Generating deterministic grounded investigation for incident ${context.incident.id} (${serviceLabel})`,
     );
 
     // Simulate minor processing latency
@@ -19,7 +20,6 @@ export class MockAIProvider implements AIProvider {
 
     const primaryAlert = context.alerts[0];
     const alertCount = context.alerts.length;
-    const taskCount = context.tasks.length;
 
     const evidenceItems: Array<{ type: string; id: string; reason: string }> = [];
 
@@ -46,10 +46,10 @@ export class MockAIProvider implements AIProvider {
     }
 
     const structuredOutput: AIOutputValidated = {
-      summary: `Automated investigation completed for ${context.incident.service}. Root cause is identified as an upstream service bottleneck with ${alertCount} correlated telemetry alert(s) detected.`,
+      summary: `Automated investigation completed for ${serviceLabel}. Root cause is identified as an upstream service bottleneck with ${alertCount} correlated telemetry alert(s) detected.`,
       hypotheses: [
         {
-          title: `Upstream Connection Saturation on ${context.incident.service}`,
+          title: `Upstream Connection Saturation on ${serviceLabel}`,
           explanation: `Telemetry indicates rapid spike in latency and error rates coinciding with alert "${primaryAlert ? primaryAlert.title : context.incident.title}".`,
           confidence: 88,
         },
@@ -64,7 +64,7 @@ export class MockAIProvider implements AIProvider {
       recommendations: [
         {
           title: 'Inspect connection pool capacity and health checks',
-          explanation: `Verify that ${context.incident.service} connection pool has not exceeded threshold limits and restart unresponsive pods if memory leaks are present.`,
+          explanation: `Verify that ${serviceLabel} connection pool has not exceeded threshold limits and restart unresponsive pods if memory leaks are present.`,
         },
         {
           title: 'Review recent configuration changes or deployments',
@@ -73,13 +73,13 @@ export class MockAIProvider implements AIProvider {
       ],
       proposedAction: {
         type: 'CREATE_TASK',
-        description: `Create mitigation checklist task: "Scale ${context.incident.service} replica count and verify pool limits"`,
+        description: `Create mitigation checklist task: "Scale ${serviceLabel} replica count and verify pool limits"`,
         parameters: {
-          title: `Verify ${context.incident.service} pool limits & scale replica count`,
-          service: context.incident.service,
+          title: `Verify ${serviceLabel} pool limits & scale replica count`,
+          services: context.incident.services,
           incidentId: context.incident.id,
         },
-        reason: `Stabilizes ${context.incident.service} throughput and relieves saturation while deep-dive continues.`,
+        reason: `Stabilizes ${serviceLabel} throughput and relieves saturation while deep-dive continues.`,
       },
     };
 
@@ -99,8 +99,6 @@ export class MockAIProvider implements AIProvider {
           totalTokens: 680,
         },
       },
-      rawOutput: JSON.stringify(validated),
     };
   }
 }
-
