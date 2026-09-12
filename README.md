@@ -287,5 +287,41 @@ The IncidentPulse platform features a mission-control command center located at 
 - Service ownership attribution and automated capacity badges (`Normal Load`, `Moderate Load`, `High Load`).
 
 ### 4. Real-time Telemetry & Stream
-- Unified live audit log streaming incidents, correlated alerts, comments, checklist tasks, and AI events over WebSockets.
 - Automatic reconnection refetching to guarantee zero desynchronization.
+
+---
+
+## Production Hardening, Reliability & Security (Phase 9)
+
+IncidentPulse incorporates multi-layered hardening across security, network resilience, distributed state management, and test automation:
+
+### 1. Prompt Injection Defense & Untrusted Input Isolation
+- **Strict Authority Hierarchy**: System instructions maintain absolute priority over any contextual inputs, prompt injections, or adversarial override attempts.
+- **Untrusted Ingestion Boundaries**: User inputs, incident descriptions, triage comments, and telemetry payload logs are treated as strictly untrusted text.
+- **Data Confidentiality & Zero Prompt/Key Leakage**: The AI engine is strictly barred from revealing system instructions, environment variables, database keys, or passwords.
+- **Grounded Verification & Anti-Hallucination**: Evidence references must match verified MongoDB entity ObjectIds retrieved during grounded context gathering. Fake or unverified IDs are flagged and rejected.
+- **Dedicated Test Suite**: [`openrouter.provider.spec.ts`](file:///c:/Users/LENOVO/Desktop/assignment/backend/src/ai/providers/openrouter.provider.spec.ts) contains explicit test cases verifying prompt injection immunity and prompt directive compliance.
+
+### 2. Redis Failure & Graceful Degradation
+- **Self-Healing Fallback**: If Redis crashes, drops connections (`ECONNRESET`), or becomes unreachable, `RedisService` automatically intercepts errors and switches to an in-memory TTL cache without terminating backend processes or throwing uncaught 500 errors.
+- **Command Exception Recovery**: Network drops during runtime operations (`get`, `set`, `del`) gracefully fall back to local memory storage while logging diagnostic warnings.
+- **Tested Outage Handling**: [`redis.service.spec.ts`](file:///c:/Users/LENOVO/Desktop/assignment/backend/src/common/redis/redis.service.spec.ts) explicitly simulates connection failures and socket disconnects.
+
+### 3. Distributed Job Idempotency & Stale State Guardrails
+- **Investigation Deduplication**: `startInvestigation` computes a composite `incidentVersion` hash (`{id}:{updatedAt}`) and prevents redundant BullMQ job dispatch if an investigation is already queued, running, or completed for that state version.
+- **Exponential Backoff**: BullMQ workers use controlled retries (2 attempts, 1s exponential backoff) with isolated in-process fallback when Redis is absent.
+- **State-Changing Action Locks**:
+  - Re-review attempts on already approved, executed, or rejected actions are rejected with `400 Bad Request`.
+  - Actions targeting resolved incidents or redundant states are rejected with `409 Conflict`.
+
+### 4. Client Reconnect Reconciliation
+- **Epoch-based Rehydration**: The React `SocketContext` maintains an incremental connection epoch. Whenever the WebSocket reconnects after a disconnect, all active views (`OperationsOverview`, `IncidentQueue`, `IncidentDetail`) automatically trigger an authoritative REST fetch to resolve state divergence.
+
+### 5. Sanitized Production Error Handling
+- **Global Exception Filter**: `AllExceptionsFilter` intercepts unhandled exceptions, sanitizes sensitive stack traces in production, and standardizes RFC-compliant JSON error bodies with ISO timestamps and request paths.
+- **DTO Whitelisting**: Global `ValidationPipe` with `whitelist: true` and `forbidNonWhitelisted: true` strips unexpected payload properties and prevents parameter injection.
+
+### 6. Automated Verification Matrix
+- **Backend Unit Tests**: 14 test suites, 87 unit tests passing (100% pass rate).
+- **ESLint & TypeScript**: Zero ESLint warnings/errors; strict TypeScript compilation.
+

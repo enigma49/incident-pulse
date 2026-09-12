@@ -56,5 +56,28 @@ describe('RedisService Fallback Behavior', () => {
     expect(await redisService.get('incident:102:detail')).toBeNull();
     expect(await redisService.get('dashboard:overview')).toBeDefined();
   });
+
+  it('should safely recover when simulated Redis client throws a socket error during GET', async () => {
+    // Inject mock client that throws network failure
+    (redisService as any).isConnected = true;
+    (redisService as any).client = {
+      get: jest.fn().mockRejectedValue(new Error('ECONNRESET: Connection dropped by peer')),
+    };
+
+    // Should not throw, should fall back to in-memory store
+    await redisService.set('fallback:key', { recovered: true });
+    const result = await redisService.get('fallback:key');
+    expect(result).toEqual({ recovered: true });
+  });
+
+  it('should safely invalidate incident cache key and dashboard overview via invalidateIncident()', async () => {
+    await redisService.set('incident:999:detail', { id: '999' });
+    await redisService.set('dashboard:overview', { count: 1 });
+
+    await redisService.invalidateIncident('999');
+
+    expect(await redisService.get('incident:999:detail')).toBeNull();
+    expect(await redisService.get('dashboard:overview')).toBeNull();
+  });
 });
 

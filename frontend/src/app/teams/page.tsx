@@ -156,56 +156,69 @@ export default function TeamsAndUsersPage() {
           </h2>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          {teams.map((t) => (
-            <div
-              key={t._id}
-              className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-4 shadow-lg hover:border-slate-700 transition-all flex flex-col justify-between"
-            >
-              <div className="space-y-3">
-                <div className="flex items-start justify-between gap-2">
-                  <h3 className="text-base font-bold text-slate-100">{t.name}</h3>
-                  <div className="flex items-center gap-1.5">
-                    {t.criticalIncidents && t.criticalIncidents > 0 ? (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-950 text-rose-300 border border-rose-800 animate-pulse">
-                        {t.criticalIncidents} Critical
+        {loading ? (
+          <div className="p-12 text-center text-slate-400 space-y-3 bg-slate-900 border border-slate-800 rounded-xl">
+            <RefreshCw className="h-6 w-6 animate-spin mx-auto text-blue-500" />
+            <p className="text-sm">Loading engineering teams and workload telemetry...</p>
+          </div>
+        ) : teams.length === 0 ? (
+          <div className="p-12 text-center text-slate-500 bg-slate-900 border border-slate-800 rounded-xl space-y-2">
+            <Briefcase className="h-8 w-8 text-slate-600 mx-auto" />
+            <p className="text-sm text-slate-300 font-semibold">No Operational Teams Configured</p>
+            <p className="text-xs text-slate-500">Create an operational team using the &quot;Add Team&quot; button above.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {teams.map((t) => (
+              <div
+                key={t._id}
+                className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-4 shadow-lg hover:border-slate-700 transition-all flex flex-col justify-between"
+              >
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="text-base font-bold text-slate-100">{t.name}</h3>
+                    <div className="flex items-center gap-1.5">
+                      {t.criticalIncidents && t.criticalIncidents > 0 ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-950 text-rose-300 border border-rose-800 animate-pulse">
+                          {t.criticalIncidents} Critical
+                        </span>
+                      ) : null}
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-blue-950 text-blue-300 border border-blue-800">
+                        {t.activeIncidents || 0} Active
                       </span>
-                    ) : null}
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-blue-950 text-blue-300 border border-blue-800">
-                      {t.activeIncidents || 0} Active
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-slate-400 leading-relaxed line-clamp-2">{t.description}</p>
+
+                  {/* Services */}
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                      Service Ownership
                     </span>
+                    <div className="flex flex-wrap gap-1">
+                      {t.serviceResponsibility.map((s, idx) => (
+                        <span
+                          key={idx}
+                          className="px-2 py-0.5 text-[11px] font-mono rounded bg-slate-950 text-slate-300 border border-slate-800"
+                        >
+                          {s}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
-                <p className="text-xs text-slate-400 leading-relaxed line-clamp-2">{t.description}</p>
-
-                {/* Services */}
-                <div className="space-y-1">
-                  <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                    Service Ownership
+                <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
+                  <span>Team Lead:</span>
+                  <span className="font-medium text-slate-200">
+                    {t.leadUserId ? (t.leadUserId as any).name || "Assigned" : "Unassigned"}
                   </span>
-                  <div className="flex flex-wrap gap-1">
-                    {t.serviceResponsibility.map((s, idx) => (
-                      <span
-                        key={idx}
-                        className="px-2 py-0.5 text-[11px] font-mono rounded bg-slate-950 text-slate-300 border border-slate-800"
-                      >
-                        {s}
-                      </span>
-                    ))}
-                  </div>
                 </div>
               </div>
-
-              <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
-                <span>Team Lead:</span>
-                <span className="font-medium text-slate-200">
-                  {t.leadUserId ? (t.leadUserId as any).name || "Assigned" : "Unassigned"}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Section 2: Operators & User Directory */}
@@ -216,22 +229,34 @@ export default function TeamsAndUsersPage() {
         </h2>
 
         <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden shadow-xl">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-slate-300">
-              <thead className="bg-slate-950 text-xs uppercase tracking-wider text-slate-400 border-b border-slate-800">
-                <tr>
-                  <th className="py-3 px-4">Operator Name</th>
-                  <th className="py-3 px-4">Email</th>
-                  <th className="py-3 px-4">Role</th>
-                  <th className="py-3 px-4">Assigned Team</th>
-                  <th className="py-3 px-4 text-center">Active Load</th>
-                  <th className="py-3 px-4 text-center">Critical P1/P2</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60">
-                {users.map((u) => (
-                  <tr key={u.id || u._id} className="hover:bg-slate-800/40 transition-colors">
-                    <td className="py-3.5 px-4 font-semibold text-slate-100 flex items-center gap-2.5">
+          {loading ? (
+            <div className="p-12 text-center text-slate-400 space-y-3">
+              <RefreshCw className="h-6 w-6 animate-spin mx-auto text-blue-500" />
+              <p className="text-sm">Loading operator directory...</p>
+            </div>
+          ) : users.length === 0 ? (
+            <div className="p-12 text-center text-slate-500 space-y-2">
+              <UserCheck className="h-8 w-8 text-slate-600 mx-auto" />
+              <p className="text-sm text-slate-300 font-semibold">No Operators Found</p>
+              <p className="text-xs text-slate-500">Seed data or create operators to populate the directory.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm text-slate-300">
+                <thead className="bg-slate-950 text-xs uppercase tracking-wider text-slate-400 border-b border-slate-800">
+                  <tr>
+                    <th className="py-3 px-4">Operator Name</th>
+                    <th className="py-3 px-4">Email</th>
+                    <th className="py-3 px-4">Role</th>
+                    <th className="py-3 px-4">Assigned Team</th>
+                    <th className="py-3 px-4 text-center">Active Load</th>
+                    <th className="py-3 px-4 text-center">Critical P1/P2</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {users.map((u) => (
+                    <tr key={u.id || u._id} className="hover:bg-slate-800/40 transition-colors">
+                      <td className="py-3.5 px-4 font-semibold text-slate-100 flex items-center gap-2.5">
                       <div className="h-7 w-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-blue-400">
                         {u.name.charAt(0)}
                       </div>
@@ -273,8 +298,9 @@ export default function TeamsAndUsersPage() {
               </tbody>
             </table>
           </div>
-        </div>
+        )}
       </div>
+    </div>
 
       {/* Add Team Modal (Admin only) */}
       {isModalOpen && (

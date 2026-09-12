@@ -111,7 +111,6 @@ export class AIInvestigation {
     required: true,
     enum: AIInvestigationStatus,
     default: AIInvestigationStatus.QUEUED,
-    index: true,
   })
   status: AIInvestigationStatus;
 
