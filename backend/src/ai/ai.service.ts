@@ -74,13 +74,25 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async initializeQueueAndWorker() {
-    const redisUrl = this.configService.get<string>('REDIS_URL') || 'redis://localhost:6379';
     try {
-      const url = new URL(redisUrl);
+      const redisUrl = this.configService.get<string>('REDIS_URL');
+      let host = this.configService.get<string>('REDIS_HOST', 'localhost');
+      let port = Number(this.configService.get<number>('REDIS_PORT', 6379));
+      let password = this.configService.get<string>('REDIS_PASSWORD') || undefined;
+
+      if (redisUrl) {
+        try {
+          const url = new URL(redisUrl);
+          host = url.hostname || host;
+          port = Number(url.port) || port;
+          password = url.password || password;
+        } catch {}
+      }
+
       const connectionOptions = {
-        host: url.hostname || 'localhost',
-        port: Number(url.port) || 6379,
-        password: url.password || undefined,
+        host,
+        port,
+        password,
         maxRetriesPerRequest: null,
       };
 
@@ -141,13 +153,43 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
       .exec();
 
     if (existingInvestigation) {
-      this.logger.log(
-        `[AIService] Reusing existing investigation ${existingInvestigation._id} for incident ${incidentId} (Version: ${incidentVersion}, Status: ${existingInvestigation.status})`,
-      );
+      if (existingInvestigation.status === AIInvestigationStatus.COMPLETED) {
+        this.logger.log(
+          `[AIService] Reusing completed investigation ${existingInvestigation._id} for incident ${incidentId} (Version: ${incidentVersion})`,
+        );
+        return {
+          investigation: existingInvestigation,
+          reused: true,
+          message: 'Existing valid investigation found for current incident version.',
+        };
+      }
+
+      // If pending in QUEUED/RUNNING, re-dispatch job to ensure queue processing
+      const jobPayload = {
+        incidentId,
+        investigationId: existingInvestigation._id.toString(),
+        incidentVersion,
+        requestedBy: currentUser?.userId || currentUser?.email || 'operator',
+      };
+
+      if (this.isRedisQueueActive && this.queue) {
+        try {
+          await this.queue.add('investigate', jobPayload, {
+            attempts: 2,
+            backoff: { type: 'exponential', delay: 1000 },
+            removeOnComplete: true,
+          });
+        } catch (queueErr: any) {
+          setImmediate(() => this.processInvestigationJob(jobPayload));
+        }
+      } else {
+        setImmediate(() => this.processInvestigationJob(jobPayload));
+      }
+
       return {
         investigation: existingInvestigation,
         reused: true,
-        message: 'Existing valid investigation found for current incident version.',
+        message: 'Investigation in progress; worker dispatched.',
       };
     }
 

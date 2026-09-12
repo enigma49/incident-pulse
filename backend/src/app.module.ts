@@ -49,12 +49,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     DashboardModule,
     EventsModule,
   ],
-  providers: [
-    {
-      provide: APP_GUARD,
-      useClass: RolesGuard,
-    },
-  ],
+  providers: [],
 })
 export class AppModule {}
 

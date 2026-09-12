@@ -6,6 +6,61 @@ An enterprise-grade, real-time AI Incident & Operations Management Platform buil
 
 ## Architecture Overview
 
+```mermaid
+flowchart TD
+    subgraph Clients["Frontend Client Layer"]
+        UI["Next.js 14 Web App<br/>(Dashboard, Incident Queue, Detail Modal)"]
+        WSClient["Socket.IO Client<br/>(Auto-reconnect & Epoch Sync)"]
+    end
+
+    subgraph Gateway["API & Realtime Gateway Layer"]
+        REST["NestJS REST Controllers<br/>(JWT Auth, RolesGuard, ValidationPipe)"]
+        WSServer["Socket.IO Gateway<br/>(Rooms: dashboard, incident:{id})"]
+    end
+
+    subgraph CoreServices["Domain Services Layer"]
+        IncService["Incident Service"]
+        AlertEngine["Alert Correlation Engine<br/>(SHA-256 Fingerprint, 30m Window)"]
+        CacheService["Redis Caching Service<br/>(Tiered TTL, Fail-soft Fallback)"]
+    end
+
+    subgraph StorageLayer["Data & Persistence Layer"]
+        MongoDB[("MongoDB 7<br/>(Incidents, Alerts, AuditLogs, Users)")]
+        RedisDB[("Redis 7<br/>(Cache Store & BullMQ Broker)")]
+    end
+
+    subgraph AIWorkerLayer["AI Investigation & Safety Layer"]
+        BullQueue["BullMQ Worker Queue<br/>(incident-investigation)"]
+        ContextCollector["Grounded Context Aggregator<br/>(Telemetry, Alerts, Similar Incidents)"]
+        Provider["AI Provider Factory<br/>(OpenRouter Claude/GPT or Mock)"]
+        Validator["Zod Structured Output & Grounding Validator"]
+        ApprovalGate{"Human Approval Gate<br/>(Pending Operator Review)"}
+        ActionExecutor["Controlled Action Engine<br/>(Stale Check, Tasks, Severity, Status)"]
+    end
+
+    UI -->|HTTPS REST| REST
+    WSClient <-->|WebSockets| WSServer
+    REST --> IncService
+    REST --> AlertEngine
+    IncService <--> CacheService
+    CacheService <--> RedisDB
+    IncService <--> MongoDB
+    AlertEngine <--> MongoDB
+
+    REST -->|Dispatch Job| BullQueue
+    BullQueue --> ContextCollector
+    ContextCollector --> MongoDB
+    ContextCollector --> Provider
+    Provider --> Validator
+    Validator -->|Persist Findings| MongoDB
+    Validator -->|Emit Progress| WSServer
+    Validator -->|Propose Action| ApprovalGate
+    ApprovalGate -->|Approve Mutation| ActionExecutor
+    ActionExecutor -->|Execute Delta| MongoDB
+    ActionExecutor -->|Invalidate Cache| CacheService
+    ActionExecutor -->|Broadcast Update| WSServer
+```
+
 - **Frontend**: Next.js 14 (App Router), TypeScript, Tailwind CSS, shadcn/ui patterns, Socket.IO Client.
 - **Backend**: NestJS, TypeScript, Mongoose (MongoDB 7), Redis (ioredis), Socket.IO, BullMQ, JWT + bcrypt.
 - **AI Engine**: OpenRouter (OpenAI-compatible SDK) with strict Zod structured outputs, bounded tool-calling loop, grounded context retrieval, and mandatory human-in-the-loop approval.
@@ -324,4 +379,148 @@ IncidentPulse incorporates multi-layered hardening across security, network resi
 ### 6. Automated Verification Matrix
 - **Backend Unit Tests**: 14 test suites, 87 unit tests passing (100% pass rate).
 - **ESLint & TypeScript**: Zero ESLint warnings/errors; strict TypeScript compilation.
+
+---
+
+## End-to-End Demo Script & Walkthrough
+
+Follow these instructions to verify the complete incident lifecycle either through the Web UI or via the REST API.
+
+### Option A: Interactive Web UI Walkthrough
+
+1. **Sign In**:
+   - Navigate to `http://localhost:3000/login`.
+   - Sign in as **Lead Operator** (`operator@example.com` / `Operator123!`) or **Administrator** (`admin@example.com` / `Admin123!`).
+2. **Operations Dashboard (`/`)**:
+   - Observe live operational metrics: Active Incidents, Critical P1/P2 load, Mitigated count, and AI Approval queue.
+   - Note the Team Workload distribution and the recent AI investigation stream.
+3. **Incident Queue & Triage (`/incidents`)**:
+   - Search, filter by severity (`P1`-`P4`), status (`OPEN`, `INVESTIGATING`, `MITIGATED`, `RESOLVED`), or service.
+   - Click on an active incident (e.g., `INC-1001` or any open incident) to open the full detail view.
+4. **Collaboration & Live Updates**:
+   - Change incident status to `INVESTIGATING` or reassign to an on-call team.
+   - Post an investigation note in the comments section.
+   - Add a mitigation checklist item in the task list.
+   - Notice instant real-time broadcasts across all open browser windows without page reload.
+5. **Run AI Investigation**:
+   - In the **AI Copilot** panel, click **Start AI Investigation**.
+   - Watch the streaming progress state: `Started` → `Gathering Grounded Telemetry` → `Reasoning` → `Completed`.
+   - Inspect grounded root cause hypotheses, verified evidence links (with entity IDs), and confidence scores.
+6. **Human Approval Gate**:
+   - Notice the AI proposed action (e.g., `CREATE_TASK` or `CHANGE_SEVERITY`) marked with `Pending Human Approval`.
+   - Click **Approve & Execute**. The action is immediately executed by the backend engine, logged to the immutable audit trail, and reflected in the incident checklist.
+7. **Resolution**:
+   - Transition the incident status to `RESOLVED`.
+   - Return to `/` and observe updated metrics and the incremented executed actions counter.
+
+---
+
+### Option B: Command-Line REST Walkthrough (curl)
+
+```bash
+# 1. Authenticate as Operator
+TOKEN=$(curl -s -X POST http://localhost:4000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"operator@example.com","password":"Operator123!"}' \
+  | grep -o '"accessToken":"[^"]*' | cut -d'"' -f4)
+
+# 2. Ingest an Alert (triggers deduplication & correlation engine)
+ALERT_ID=$(curl -s -X POST http://localhost:4000/alerts \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "High Memory Pressure on auth-service",
+    "service": "auth-service",
+    "severity": "P2",
+    "source": "prometheus",
+    "metadata": {"host": "auth-node-01", "usagePercent": 94}
+  }' | grep -o '"_id":"[^"]*' | head -1 | cut -d'"' -f4)
+
+# 3. List Incidents & pick one
+INCIDENT_ID=$(curl -s -X GET "http://localhost:4000/incidents?limit=1" \
+  -H "Authorization: Bearer $TOKEN" \
+  | grep -o '"_id":"[^"]*' | head -1 | cut -d'"' -f4)
+
+# 4. Trigger Grounded AI Investigation
+curl -s -X POST "http://localhost:4000/incidents/$INCIDENT_ID/investigate" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Wait 2 seconds for background worker completion
+sleep 2
+
+# 5. Fetch Investigation & Pending Proposed Action
+INVESTIGATION=$(curl -s -X GET "http://localhost:4000/incidents/$INCIDENT_ID/investigations" \
+  -H "Authorization: Bearer $TOKEN")
+
+# 6. Approve and Execute Proposed Mitigation Action
+curl -s -X POST "http://localhost:4000/incidents/$INCIDENT_ID/investigation/actions/approve" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"notes": "Verified and authorized by operator"}'
+
+# 7. Check Dashboard Overview (with Redis cache verification)
+curl -s -X GET "http://localhost:4000/dashboard/overview" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+## API Reference Summary
+
+### Authentication (`/auth`)
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| `POST` | `/auth/login` | Authenticate with email/password; returns JWT access + refresh tokens | No |
+| `POST` | `/auth/refresh` | Refresh expired access token using valid refresh token | No |
+| `GET` | `/auth/me` | Retrieve profile and assigned roles for currently authenticated user | Bearer JWT |
+
+### Incidents (`/incidents`)
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| `GET` | `/incidents` | List incidents with search, filtering (status, severity, service), sorting, and pagination | Bearer JWT |
+| `POST` | `/incidents` | Manually report a new incident | Bearer JWT |
+| `GET` | `/incidents/:id` | Fetch full composite incident detail (cached with 15s TTL) | Bearer JWT |
+| `PATCH` | `/incidents/:id` | Update incident metadata (title, summary, status, severity) | Bearer JWT |
+| `PATCH` | `/incidents/:id/assign` | Update incident team and responder assignment | Bearer JWT |
+| `POST` | `/incidents/:id/comments` | Add responder triage comment | Bearer JWT |
+| `POST` | `/incidents/:id/tasks` | Create a mitigation checklist task | Bearer JWT |
+| `PATCH` | `/incidents/:id/tasks/:taskId` | Toggle task completion or edit title/description | Bearer JWT |
+| `DELETE` | `/incidents/:id/tasks/:taskId` | Remove a checklist task | Bearer JWT |
+
+### Alerts (`/alerts`)
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| `POST` | `/alerts` | Ingest alert with SHA-256 deduplication and 30-minute correlation | Bearer JWT |
+| `GET` | `/alerts` | List all ingested alerts with status and service filters | Bearer JWT |
+| `PATCH` | `/alerts/:id/associate` | Manually link unassigned alert to an active incident | Bearer JWT |
+| `PATCH` | `/alerts/:id/unassociate` | Detach alert from an incident | Bearer JWT |
+
+### AI Investigations & Approvals (`/incidents/:id/...`)
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| `POST` | `/incidents/:id/investigate` | Enqueue background AI investigation (idempotent per version) | Bearer JWT |
+| `GET` | `/incidents/:id/investigations` | Retrieve investigation history, grounded evidence, and recommendations | Bearer JWT |
+| `POST` | `/incidents/:id/investigation/actions/approve` | Approve and deterministically execute latest proposed mitigation action | `ADMIN` / `OPERATOR` |
+| `POST` | `/incidents/:id/investigations/:invId/actions/approve` | Approve and execute specific action by investigation ID | `ADMIN` / `OPERATOR` |
+| `POST` | `/incidents/:id/investigation/actions/reject` | Reject proposed action with optional operator rationale | `ADMIN` / `OPERATOR` |
+| `POST` | `/incidents/:id/investigations/:invId/actions/reject` | Reject specific proposed action by investigation ID | `ADMIN` / `OPERATOR` |
+
+### Dashboard & Health (`/dashboard`, `/health`)
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| `GET` | `/dashboard/overview` | Aggregated executive operational metrics and AI approval queue (cached with 30s TTL) | Bearer JWT |
+| `GET` | `/health` | Live system readiness and healthcheck (verifies MongoDB and Redis connections) | No |
+
+---
+
+## Architectural Trade-offs & Design Decisions
+
+| Decision | Chosen Approach | Alternative Considered | Rationale & Trade-off |
+|----------|-----------------|------------------------|-----------------------|
+| **AI Architecture** | Bounded single-round context aggregation + structured schema output | Multi-step agentic tool execution loop | Arbitrary tool loops in production risk infinite execution, non-deterministic latency spikes, and ballooning token consumption. Grounded deterministic retrieval guarantees < 3s execution with bounded cost. |
+| **Action Execution Model** | Strict Human-in-the-Loop approval gate | Fully autonomous AI self-healing | In enterprise incident management, autonomous mutation without human verification poses catastrophic reliability risks (e.g., unintended data loss or erroneous failover). The platform enforces operator authorization for all state mutations. |
+| **Cache Invalidation** | Event-driven targeted eviction with TTL safety bounds | Write-through cache / Distributed invalidation pub-sub | Targeted key eviction (`redisService.invalidateIncident(id)`) guarantees immediate consistency on all write paths while keeping operational overhead low. The 15–30s TTL acts as a safeguard against any missed invalidation. |
+| **Network Resilience** | Optimistic WebSocket events with Reconnect Epoch REST refetching | Event-sourced streaming / CRDTs | Socket.IO provides low-latency interactive updates. Tracking connection epochs and refetching authoritative REST state on reconnect ensures zero state drift without the extreme complexity and storage overhead of CRDTs. |
+| **Storage Architecture** | MongoDB Document Storage with compound indexing | Relational SQL (Postgres) | Incidents contain highly dynamic, semi-structured telemetry, audit timelines, evidence payloads, and nested checklist items. MongoDB documents naturally model this hierarchical data while compound indexes support fast multi-tenant queue queries. |
+
 
