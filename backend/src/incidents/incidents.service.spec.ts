@@ -8,6 +8,7 @@ import { Task } from '../tasks/schemas/task.schema';
 import { AIInvestigation } from '../ai/schemas/ai-investigation.schema';
 import { AuditService } from '../audit/audit.service';
 import { RedisService } from '../common/redis/redis.service';
+import { EventsGateway } from '../events/events.gateway';
 import { Types } from 'mongoose';
 
 describe('IncidentsService', () => {
@@ -18,6 +19,7 @@ describe('IncidentsService', () => {
   let taskModel: any;
   let aiInvestigationModel: any;
   let auditService: jest.Mocked<Partial<AuditService>>;
+  let eventsGateway: any;
 
   const mockIncident = {
     _id: new Types.ObjectId(),
@@ -132,10 +134,27 @@ describe('IncidentsService', () => {
             invalidateDashboard: jest.fn().mockResolvedValue(undefined),
           },
         },
+        {
+          provide: EventsGateway,
+          useValue: {
+            emitIncidentCreated: jest.fn(),
+            emitIncidentUpdated: jest.fn(),
+            emitIncidentStatusChanged: jest.fn(),
+            emitIncidentSeverityChanged: jest.fn(),
+            emitIncidentAssigned: jest.fn(),
+            emitCommentCreated: jest.fn(),
+            emitTaskCreated: jest.fn(),
+            emitTaskUpdated: jest.fn(),
+            emitTaskDeleted: jest.fn(),
+            emitAlertAssociated: jest.fn(),
+            emitAIInvestigationEvent: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
     service = module.get<IncidentsService>(IncidentsService);
+    eventsGateway = module.get<EventsGateway>(EventsGateway);
   });
 
   it('should be defined', () => {

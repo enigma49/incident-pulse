@@ -35,13 +35,16 @@ import {
   Activity,
   ChevronDown,
   Layers,
+  Radio,
 } from "lucide-react";
+import { useSocket } from "../../../context/SocketContext";
 
 export default function IncidentDetailPage() {
   const params = useParams();
   const router = useRouter();
   const id = params?.id as string;
   const { user } = useAuth();
+  const { socket, joinIncident, leaveIncident, reconnectEpoch, isConnected } = useSocket();
 
   // State
   const [incident, setIncident] = useState<Incident | null>(null);
@@ -96,6 +99,139 @@ export default function IncidentDetailPage() {
     setActionSuccess(msg);
     setTimeout(() => setActionSuccess(null), 3500);
   };
+
+  const refreshAudit = useCallback(async () => {
+    if (!id) return;
+    try {
+      const data = await api.incidents.get(id);
+      setAuditEvents(data.auditEvents || []);
+    } catch {
+      // silent
+    }
+  }, [id]);
+
+  // Reconnect handling: full REST refetch on socket reconnection
+  useEffect(() => {
+    if (reconnectEpoch > 0) {
+      fetchIncidentDetail();
+    }
+  }, [reconnectEpoch, fetchIncidentDetail]);
+
+  // Realtime Socket.IO room subscription and event listeners
+  useEffect(() => {
+    if (!id) return;
+    joinIncident(id);
+
+    if (!socket) return;
+
+    const onStatusChanged = (updatedIncident: any) => {
+      if (updatedIncident._id === id) {
+        setIncident((prev) =>
+          prev
+            ? { ...prev, status: updatedIncident.status, resolvedAt: updatedIncident.resolvedAt }
+            : null
+        );
+        showNotification(`Live update: Status changed to ${updatedIncident.status}`);
+        refreshAudit();
+      }
+    };
+
+    const onSeverityChanged = (updatedIncident: any) => {
+      if (updatedIncident._id === id) {
+        setIncident((prev) =>
+          prev ? { ...prev, severity: updatedIncident.severity } : null
+        );
+        showNotification(`Live update: Severity changed to ${updatedIncident.severity}`);
+        refreshAudit();
+      }
+    };
+
+    const onAssigned = (updatedIncident: any) => {
+      if (updatedIncident._id === id) {
+        setIncident((prev) =>
+          prev
+            ? {
+                ...prev,
+                assigneeId: updatedIncident.assigneeId,
+                teamId: updatedIncident.teamId,
+              }
+            : null
+        );
+        showNotification("Live update: Incident assignment updated");
+        refreshAudit();
+      }
+    };
+
+    const onUpdated = (updatedIncident: any) => {
+      if (updatedIncident._id === id) {
+        setIncident((prev) => (prev ? { ...prev, ...updatedIncident } : null));
+        refreshAudit();
+      }
+    };
+
+    const onCommentCreated = (comment: Comment) => {
+      setComments((prev) => {
+        if (prev.some((c) => c._id === comment._id)) return prev;
+        return [...prev, comment];
+      });
+      refreshAudit();
+    };
+
+    const onTaskCreated = (task: Task) => {
+      setTasks((prev) => {
+        if (prev.some((t) => t._id === task._id)) return prev;
+        return [...prev, task];
+      });
+      refreshAudit();
+    };
+
+    const onTaskUpdated = (task: Task) => {
+      setTasks((prev) => prev.map((t) => (t._id === task._id ? task : t)));
+      refreshAudit();
+    };
+
+    const onTaskDeleted = ({ taskId }: { taskId: string }) => {
+      setTasks((prev) => prev.filter((t) => t._id !== taskId));
+      refreshAudit();
+    };
+
+    const onAlertAssociated = (alert: Alert) => {
+      setAlerts((prev) => {
+        if (prev.some((a) => a._id === alert._id)) return prev;
+        return [alert, ...prev];
+      });
+      refreshAudit();
+    };
+
+    const onAIEvent = (aiEvent: { type: string; data: any }) => {
+      showNotification(`AI Engine: ${aiEvent.type}`);
+    };
+
+    socket.on("incident:status_changed", onStatusChanged);
+    socket.on("incident:severity_changed", onSeverityChanged);
+    socket.on("incident:assigned", onAssigned);
+    socket.on("incident:updated", onUpdated);
+    socket.on("comment:created", onCommentCreated);
+    socket.on("task:created", onTaskCreated);
+    socket.on("task:updated", onTaskUpdated);
+    socket.on("task:deleted", onTaskDeleted);
+    socket.on("alert:associated", onAlertAssociated);
+    socket.on("ai:investigation_event", onAIEvent);
+
+    return () => {
+      leaveIncident(id);
+      socket.off("incident:status_changed", onStatusChanged);
+      socket.off("incident:severity_changed", onSeverityChanged);
+      socket.off("incident:assigned", onAssigned);
+      socket.off("incident:updated", onUpdated);
+      socket.off("comment:created", onCommentCreated);
+      socket.off("task:created", onTaskCreated);
+      socket.off("task:updated", onTaskUpdated);
+      socket.off("task:deleted", onTaskDeleted);
+      socket.off("alert:associated", onAlertAssociated);
+      socket.off("ai:investigation_event", onAIEvent);
+    };
+  }, [id, socket, joinIncident, leaveIncident, refreshAudit]);
 
   // Status Change
   const handleStatusChange = async (newStatus: IncidentStatus) => {
@@ -219,16 +355,6 @@ export default function IncidentDetailPage() {
     }
   };
 
-  const refreshAudit = async () => {
-    if (!id) return;
-    try {
-      const data = await api.incidents.get(id);
-      setAuditEvents(data.auditEvents || []);
-    } catch {
-      // silent
-    }
-  };
-
   const getSeverityBadge = (sev: IncidentSeverity) => {
     switch (sev) {
       case "P1":
@@ -324,6 +450,13 @@ export default function IncidentDetailPage() {
                   <CheckCircle className="h-3 w-3" /> Resolved
                 </span>
               )}
+              <span
+                title={`Socket Room: incident:${incident._id} - Realtime Collaboration Active`}
+                className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-950/60 text-emerald-300 border border-emerald-800 flex items-center gap-1.5 font-mono"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />
+                Live Sync
+              </span>
             </div>
             <h1 className="text-2xl font-bold text-slate-100 tracking-tight">{incident.title}</h1>
           </div>

@@ -16,6 +16,7 @@ import { AuditModule } from './audit/audit.module';
 import { AIModule } from './ai/ai.module';
 import { DatabaseModule } from './database/database.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { EventsModule } from './events/events.module';
 import { RolesGuard } from './common/guards/roles.guard';
 
 @Module({
@@ -46,6 +47,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     AIModule,
     DatabaseModule,
     DashboardModule,
+    EventsModule,
   ],
   providers: [
     {

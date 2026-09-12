@@ -110,4 +110,34 @@ The platform incorporates tiered Redis caching for read-heavy operations with st
   2. The application falls back seamlessly to an in-memory TTL store backed by direct MongoDB queries.
   3. The core application remains 100% operational with zero downtime or uncaught process crashes.
 
+---
+
+## Realtime Collaboration Architecture
+
+IncidentPulse features full-duplex WebSocket communication powered by **Socket.IO**:
+
+### Socket.IO Rooms
+- `dashboard`: Subscribed to by the operations overview and incident queue. Receives platform-wide alerts, new incidents, and high-level status changes.
+- `incident:{id}`: Subscribed to when viewing a specific incident detail page. Delivers fine-grained collaboration events (status/severity changes, assignment updates, comments, checklist tasks, correlated alerts, AI investigation steps).
+
+### Realtime Event Protocol
+| Event Name | Room Scope | Payload | Description |
+|------------|------------|---------|-------------|
+| `incident:created` | `dashboard` | `Incident` | Emitted when a new incident is ingested or manually created |
+| `incident:updated` | `dashboard`, `incident:{id}` | `Incident` | Emitted on metadata/description updates |
+| `incident:status_changed` | `dashboard`, `incident:{id}` | `Incident` | Emitted when incident transitions state (`OPEN`, `INVESTIGATING`, `MITIGATED`, `RESOLVED`) |
+| `incident:severity_changed` | `dashboard`, `incident:{id}` | `Incident` | Emitted on severity escalation or de-escalation (`P1`-`P4`) |
+| `incident:assigned` | `dashboard`, `incident:{id}` | `Incident` (populated) | Emitted when owner or team assignment is updated |
+| `comment:created` | `incident:{id}` | `Comment` (populated) | Emitted when a team member posts a collaboration note |
+| `task:created` | `incident:{id}` | `Task` | Emitted when a mitigation checklist task is created |
+| `task:updated` | `incident:{id}` | `Task` | Emitted when a mitigation checklist task is completed or modified |
+| `task:deleted` | `incident:{id}` | `{ taskId }` | Emitted when a task is removed |
+| `alert:associated` | `dashboard`, `incident:{id}` | `Alert` | Emitted when an alert is correlated to an incident |
+| `ai:investigation_event` | `incident:{id}` | `{ type, data }` | Streams autonomous AI reasoning, tool calls, and hypothesis generation |
+
+### Network Resilience & Reconnect Reconciliation
+- **Authoritative REST Refetch**: Real-time events provide immediate optimistic UI feedback. However, during network drops or disconnects, missed socket events could create state drift.
+- **Reconnect Epoch Listener**: The frontend tracks socket connection epochs. Upon any reconnect (`socket.on('connect')` after disconnect), the client automatically triggers an authoritative REST fetch (`GET /incidents/:id` or `GET /dashboard/overview`), ensuring 100% data consistency without manual refresh.
+
+
 

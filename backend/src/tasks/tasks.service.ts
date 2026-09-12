@@ -7,6 +7,7 @@ import { AuditService } from '../audit/audit.service';
 import { ActorType } from '../audit/schemas/audit-event.schema';
 import { CreateTaskDto, UpdateTaskDto } from './dto/task.dto';
 import { RedisService } from '../common/redis/redis.service';
+import { EventsGateway } from '../events/events.gateway';
 
 @Injectable()
 export class TasksService {
@@ -17,6 +18,7 @@ export class TasksService {
     @InjectModel(Incident.name) private incidentModel: Model<IncidentDocument>,
     private auditService: AuditService,
     private redisService: RedisService,
+    private eventsGateway: EventsGateway,
   ) {}
 
   async create(
@@ -52,7 +54,12 @@ export class TasksService {
     // Invalidate incident cache
     await this.redisService.invalidateIncident(incidentId);
 
-    return saved.populate('assigneeId', 'name email role');
+    const populated = await saved.populate('assigneeId', 'name email role');
+
+    // Emit realtime event
+    this.eventsGateway.emitTaskCreated(incidentId, populated);
+
+    return populated;
   }
 
   async findByIncident(incidentId: string): Promise<TaskDocument[]> {
@@ -95,7 +102,12 @@ export class TasksService {
     // Invalidate incident cache
     await this.redisService.invalidateIncident(saved.incidentId.toString());
 
-    return saved.populate('assigneeId', 'name email role');
+    const populated = await saved.populate('assigneeId', 'name email role');
+
+    // Emit realtime event
+    this.eventsGateway.emitTaskUpdated(saved.incidentId.toString(), populated);
+
+    return populated;
   }
 
   async delete(id: string, currentUser: any): Promise<void> {
@@ -119,5 +131,8 @@ export class TasksService {
 
     // Invalidate incident cache
     await this.redisService.invalidateIncident(incidentId);
+
+    // Emit realtime event
+    this.eventsGateway.emitTaskDeleted(incidentId, id);
   }
 }

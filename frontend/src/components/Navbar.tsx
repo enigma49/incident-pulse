@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "../context/AuthContext";
+import { useSocket } from "../context/SocketContext";
 import {
   Shield,
   Activity,
@@ -14,11 +15,14 @@ import {
   UserCheck,
   ChevronDown,
   Radio,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 
 export default function Navbar() {
   const pathname = usePathname();
   const { user, login, logout, switchDemoUser } = useAuth();
+  const { connectionStatus, isConnected } = useSocket();
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [emailInput, setEmailInput] = useState("");
   const [passwordInput, setPasswordInput] = useState("");
@@ -92,6 +96,34 @@ export default function Navbar() {
 
           {/* User Controls / Quick Switch */}
           <div className="flex items-center gap-3">
+            {/* Socket.IO Realtime Engine Status */}
+            <div
+              title={`Realtime Collaboration Engine: ${connectionStatus}`}
+              className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono border transition-all ${
+                connectionStatus === "connected"
+                  ? "bg-emerald-950/60 text-emerald-300 border-emerald-800/80"
+                  : connectionStatus === "connecting"
+                  ? "bg-amber-950/60 text-amber-300 border-amber-800/80"
+                  : "bg-rose-950/60 text-rose-300 border-rose-800/80"
+              }`}
+            >
+              <span className="relative flex h-2 w-2">
+                {connectionStatus === "connected" && (
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                )}
+                <span
+                  className={`relative inline-flex rounded-full h-2 w-2 ${
+                    connectionStatus === "connected"
+                      ? "bg-emerald-500"
+                      : connectionStatus === "connecting"
+                      ? "bg-amber-500"
+                      : "bg-rose-500"
+                  }`}
+                />
+              </span>
+              <span>{connectionStatus === "connected" ? "Live" : connectionStatus === "connecting" ? "Reconnecting..." : "Offline"}</span>
+            </div>
+
             {user ? (
               <div className="flex items-center gap-3">
                 <div className="hidden sm:flex flex-col text-right">

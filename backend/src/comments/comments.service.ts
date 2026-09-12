@@ -7,6 +7,7 @@ import { AuditService } from '../audit/audit.service';
 import { ActorType } from '../audit/schemas/audit-event.schema';
 import { CreateCommentDto } from './dto/comment.dto';
 import { RedisService } from '../common/redis/redis.service';
+import { EventsGateway } from '../events/events.gateway';
 
 @Injectable()
 export class CommentsService {
@@ -17,6 +18,7 @@ export class CommentsService {
     @InjectModel(Incident.name) private incidentModel: Model<IncidentDocument>,
     private auditService: AuditService,
     private redisService: RedisService,
+    private eventsGateway: EventsGateway,
   ) {}
 
   async create(
@@ -50,7 +52,12 @@ export class CommentsService {
     // Invalidate incident detail cache
     await this.redisService.invalidateIncident(incidentId);
 
-    return saved.populate('userId', 'name email role');
+    const populated = await saved.populate('userId', 'name email role');
+
+    // Emit realtime event
+    this.eventsGateway.emitCommentCreated(incidentId, populated);
+
+    return populated;
   }
 
   async findByIncident(incidentId: string): Promise<CommentDocument[]> {

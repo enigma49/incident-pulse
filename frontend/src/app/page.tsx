@@ -19,13 +19,16 @@ import {
   Layers,
   Cpu,
 } from "lucide-react";
+import { useSocket } from "../context/SocketContext";
 
 export default function OperationsOverviewPage() {
   const { user } = useAuth();
+  const { socket, joinDashboard, leaveDashboard, reconnectEpoch, isConnected } = useSocket();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [lastEvent, setLastEvent] = useState<string | null>(null);
 
   const fetchOverview = useCallback(async () => {
     setRefreshing(true);
@@ -45,6 +48,49 @@ export default function OperationsOverviewPage() {
     fetchOverview();
   }, [fetchOverview]);
 
+  // Refetch authoritative overview on socket reconnection
+  useEffect(() => {
+    if (reconnectEpoch > 0) {
+      fetchOverview();
+    }
+  }, [reconnectEpoch, fetchOverview]);
+
+  // Join dashboard room & listen for realtime mutation broadcasts
+  useEffect(() => {
+    joinDashboard();
+
+    if (!socket) return;
+
+    const handleRealtimeUpdate = (evtName: string) => (payload: any) => {
+      setLastEvent(`${evtName} (${new Date().toLocaleTimeString()})`);
+      fetchOverview();
+    };
+
+    const onCreated = handleRealtimeUpdate("Incident Created");
+    const onUpdated = handleRealtimeUpdate("Incident Updated");
+    const onStatus = handleRealtimeUpdate("Status Changed");
+    const onSeverity = handleRealtimeUpdate("Severity Changed");
+    const onAssigned = handleRealtimeUpdate("Incident Assigned");
+    const onAlert = handleRealtimeUpdate("Alert Correlated");
+
+    socket.on("incident:created", onCreated);
+    socket.on("incident:updated", onUpdated);
+    socket.on("incident:status_changed", onStatus);
+    socket.on("incident:severity_changed", onSeverity);
+    socket.on("incident:assigned", onAssigned);
+    socket.on("alert:associated", onAlert);
+
+    return () => {
+      leaveDashboard();
+      socket.off("incident:created", onCreated);
+      socket.off("incident:updated", onUpdated);
+      socket.off("incident:status_changed", onStatus);
+      socket.off("incident:severity_changed", onSeverity);
+      socket.off("incident:assigned", onAssigned);
+      socket.off("alert:associated", onAlert);
+    };
+  }, [socket, joinDashboard, leaveDashboard, fetchOverview]);
+
   return (
     <div className="space-y-6">
       {/* Header with Cache status indicator */}
@@ -60,6 +106,13 @@ export default function OperationsOverviewPage() {
         </div>
 
         <div className="flex items-center gap-3">
+          {lastEvent && (
+            <div className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-950/40 border border-emerald-800 text-xs text-emerald-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />
+              <span>Live: {lastEvent}</span>
+            </div>
+          )}
+
           {data && (
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs">
               <Zap className={`h-3.5 w-3.5 ${data.fromCache ? "text-amber-400 fill-amber-400/30" : "text-blue-400"}`} />

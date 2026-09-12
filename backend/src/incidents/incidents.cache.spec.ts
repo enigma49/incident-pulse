@@ -8,6 +8,7 @@ import { Task } from '../tasks/schemas/task.schema';
 import { AIInvestigation } from '../ai/schemas/ai-investigation.schema';
 import { AuditService } from '../audit/audit.service';
 import { RedisService, CACHE_KEYS } from '../common/redis/redis.service';
+import { EventsGateway } from '../events/events.gateway';
 import { Types } from 'mongoose';
 
 describe('IncidentsService Caching & Invalidation', () => {
@@ -76,6 +77,22 @@ describe('IncidentsService Caching & Invalidation', () => {
           useValue: { logEvent: jest.fn().mockResolvedValue({} as any), findByIncidentId: jest.fn().mockResolvedValue([]) },
         },
         { provide: RedisService, useValue: redisService },
+        {
+          provide: EventsGateway,
+          useValue: {
+            emitIncidentCreated: jest.fn(),
+            emitIncidentUpdated: jest.fn(),
+            emitIncidentStatusChanged: jest.fn(),
+            emitIncidentSeverityChanged: jest.fn(),
+            emitIncidentAssigned: jest.fn(),
+            emitCommentCreated: jest.fn(),
+            emitTaskCreated: jest.fn(),
+            emitTaskUpdated: jest.fn(),
+            emitTaskDeleted: jest.fn(),
+            emitAlertAssociated: jest.fn(),
+            emitAIInvestigationEvent: jest.fn(),
+          },
+        },
       ],
     }).compile();
 

@@ -19,10 +19,13 @@ import {
   HelpCircle,
   RefreshCw,
   ExternalLink,
+  Radio,
 } from "lucide-react";
+import { useSocket } from "../../context/SocketContext";
 
 export default function IncidentQueuePage() {
   const { user } = useAuth();
+  const { socket, joinDashboard, leaveDashboard, reconnectEpoch, isConnected } = useSocket();
   const router = useRouter();
 
   // State
@@ -34,6 +37,7 @@ export default function IncidentQueuePage() {
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [liveBanner, setLiveBanner] = useState<string | null>(null);
 
   // Filters
   const [search, setSearch] = useState("");
@@ -87,6 +91,47 @@ export default function IncidentQueuePage() {
   useEffect(() => {
     api.teams.list().then(setTeams).catch(() => {});
   }, []);
+
+  // Reconnect handling: full REST refetch on socket reconnection
+  useEffect(() => {
+    if (reconnectEpoch > 0) {
+      fetchIncidents();
+    }
+  }, [reconnectEpoch, fetchIncidents]);
+
+  // Realtime Socket.IO room and event subscriptions
+  useEffect(() => {
+    joinDashboard();
+
+    if (!socket) return;
+
+    const handleIncidentUpdate = (eventDesc: string) => (incidentData: any) => {
+      setLiveBanner(`${eventDesc}: "${incidentData.title || incidentData._id}"`);
+      setTimeout(() => setLiveBanner(null), 4000);
+      fetchIncidents();
+    };
+
+    const onCreated = handleIncidentUpdate("New Incident Created");
+    const onUpdated = handleIncidentUpdate("Incident Updated");
+    const onStatus = handleIncidentUpdate("Status Changed");
+    const onSeverity = handleIncidentUpdate("Severity Changed");
+    const onAssigned = handleIncidentUpdate("Assignee Changed");
+
+    socket.on("incident:created", onCreated);
+    socket.on("incident:updated", onUpdated);
+    socket.on("incident:status_changed", onStatus);
+    socket.on("incident:severity_changed", onSeverity);
+    socket.on("incident:assigned", onAssigned);
+
+    return () => {
+      leaveDashboard();
+      socket.off("incident:created", onCreated);
+      socket.off("incident:updated", onUpdated);
+      socket.off("incident:status_changed", onStatus);
+      socket.off("incident:severity_changed", onSeverity);
+      socket.off("incident:assigned", onAssigned);
+    };
+  }, [socket, joinDashboard, leaveDashboard, fetchIncidents]);
 
   const handleCreateIncident = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -184,6 +229,15 @@ export default function IncidentQueuePage() {
           </button>
         </div>
       </div>
+
+      {/* Live Realtime Notification Banner */}
+      {liveBanner && (
+        <div className="flex items-center gap-2.5 p-3 bg-blue-950/60 border border-blue-800/80 rounded-xl text-xs text-blue-200 shadow-lg animate-in fade-in">
+          <span className="h-2 w-2 rounded-full bg-blue-400 animate-ping" />
+          <span className="font-semibold text-blue-400">Realtime Event:</span>
+          <span>{liveBanner}</span>
+        </div>
+      )}
 
       {/* Filter & Search Bar */}
       <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3">

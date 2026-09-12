@@ -28,6 +28,7 @@ import {
 } from './dto/incident.dto';
 import { QueryIncidentsDto } from './dto/query-incidents.dto';
 import { RedisService, CACHE_KEYS, CACHE_TTLS } from '../common/redis/redis.service';
+import { EventsGateway } from '../events/events.gateway';
 
 @Injectable()
 export class IncidentsService {
@@ -42,6 +43,7 @@ export class IncidentsService {
     private aiInvestigationModel: Model<AIInvestigationDocument>,
     private auditService: AuditService,
     private redisService: RedisService,
+    private eventsGateway: EventsGateway,
   ) {}
 
   async create(dto: CreateIncidentDto, currentUser: any): Promise<IncidentDocument> {
@@ -75,6 +77,9 @@ export class IncidentsService {
 
     // Invalidate cached operations dashboard
     await this.redisService.invalidateDashboard();
+
+    // Emit realtime event
+    this.eventsGateway.emitIncidentCreated(saved);
 
     return saved;
   }
@@ -263,6 +268,9 @@ export class IncidentsService {
     // Invalidate incident detail and dashboard caches
     await this.redisService.invalidateIncident(id);
 
+    // Emit realtime event
+    this.eventsGateway.emitIncidentUpdated(updated);
+
     return updated;
   }
 
@@ -303,6 +311,9 @@ export class IncidentsService {
     // Invalidate caches
     await this.redisService.invalidateIncident(id);
 
+    // Emit realtime event
+    this.eventsGateway.emitIncidentStatusChanged(saved);
+
     return saved;
   }
 
@@ -336,6 +347,9 @@ export class IncidentsService {
 
     // Invalidate caches
     await this.redisService.invalidateIncident(id);
+
+    // Emit realtime event
+    this.eventsGateway.emitIncidentSeverityChanged(saved);
 
     return saved;
   }
@@ -372,10 +386,15 @@ export class IncidentsService {
     // Invalidate caches
     await this.redisService.invalidateIncident(id);
 
-    return saved.populate([
+    const populated = await saved.populate([
       { path: 'teamId', select: 'name serviceResponsibility' },
       { path: 'assigneeId', select: 'name email role' },
     ]);
+
+    // Emit realtime event
+    this.eventsGateway.emitIncidentAssigned(populated);
+
+    return populated;
   }
 
   async resolve(id: string, currentUser: any): Promise<IncidentDocument> {
