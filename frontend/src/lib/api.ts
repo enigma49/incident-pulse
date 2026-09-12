@@ -131,14 +131,32 @@ export const api = {
   },
 
   alerts: {
-    list: (params: { service?: string; status?: string; limit?: number } = {}) => {
+    list: (params: Record<string, any> = {}) => {
       const searchParams = new URLSearchParams();
-      if (params.service) searchParams.append('service', params.service);
-      if (params.status) searchParams.append('status', params.status);
-      if (params.limit) searchParams.append('limit', String(params.limit));
-      return request<any[]>(`/alerts?${searchParams.toString()}`);
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') {
+          searchParams.append(k, String(v));
+        }
+      });
+      const query = searchParams.toString();
+      return request<any>(`/alerts${query ? `?${query}` : ''}`);
     },
     getByIncident: (incidentId: string) => request<any[]>(`/alerts/incident/${incidentId}`),
+    get: (id: string) => request<any>(`/alerts/${id}`),
+    create: (data: any) =>
+      request<any>('/alerts', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    associate: (alertId: string, incidentId: string) =>
+      request<any>(`/alerts/${alertId}/associate`, {
+        method: 'PATCH',
+        body: JSON.stringify({ incidentId }),
+      }),
+    unassociate: (alertId: string) =>
+      request<any>(`/alerts/${alertId}/unassociate`, {
+        method: 'PATCH',
+      }),
   },
 
   dashboard: {

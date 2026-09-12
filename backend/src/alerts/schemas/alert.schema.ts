@@ -42,6 +42,15 @@ export class Alert {
   })
   status: AlertStatus;
 
+  @Prop({ default: null })
+  fingerprint?: string;
+
+  @Prop({ default: 1 })
+  count: number;
+
+  @Prop({ default: () => new Date() })
+  lastSeenAt: Date;
+
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -51,4 +60,5 @@ export const AlertSchema = SchemaFactory.createForClass(Alert);
 AlertSchema.index({ service: 1, timestamp: -1 });
 AlertSchema.index({ incidentId: 1 });
 AlertSchema.index({ status: 1 });
+AlertSchema.index({ fingerprint: 1, timestamp: -1 });
 

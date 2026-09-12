@@ -139,5 +139,26 @@ IncidentPulse features full-duplex WebSocket communication powered by **Socket.I
 - **Authoritative REST Refetch**: Real-time events provide immediate optimistic UI feedback. However, during network drops or disconnects, missed socket events could create state drift.
 - **Reconnect Epoch Listener**: The frontend tracks socket connection epochs. Upon any reconnect (`socket.on('connect')` after disconnect), the client automatically triggers an authoritative REST fetch (`GET /incidents/:id` or `GET /dashboard/overview`), ensuring 100% data consistency without manual refresh.
 
+---
+
+## Deterministic Alert Correlation & Deduplication Engine
+
+The platform provides high-throughput alert ingestion with intelligent grouping and severity management:
+
+### Ingestion Flow (`POST /alerts`)
+1. **Deduplication Fingerprinting (5-minute sliding window)**:
+   - Computes deterministic SHA-256 fingerprint: `SHA256(service:title:source)`.
+   - If an alert with the same fingerprint was ingested within the past 5 minutes, increments the existing alert's `count` and updates `lastSeenAt` without generating redundant alerts or incidents.
+2. **Deterministic Incident Correlation (30-minute clustering window)**:
+   - Queries MongoDB for an active non-resolved incident (`status != 'RESOLVED'`) matching the alert's `service` updated within the last 30 minutes.
+   - **Correlate to Existing**: If matched, associates the alert to the active incident (`status = 'CORRELATED'`), logs an audit event, invalidates Redis incident cache, and broadcasts `alert:associated`.
+   - **Automatic Incident Creation**: If no active incident is found within 30 minutes, spawns a new incident titled `[Incident] {alert.title} ({alert.service})` with status `OPEN`, assigns the alert, logs an audit trail, invalidates dashboard cache, and broadcasts `incident:created` and `alert:associated`.
+3. **Severity Escalation Policy**:
+   - If an alert correlated to an active incident has a higher severity than the incident (e.g. incoming alert is `P1` / `CRITICAL` while incident is `P3`), the incident is escalated to the higher severity.
+   - The escalation records an audit event (`SEVERITY_CHANGED`, reason: `ALERT_CORRELATION_ESCALATION`) and broadcasts `incident:severity_changed` across all connected clients.
+4. **Manual Association & Unassociation**:
+   - Responders can manually associate unassigned alerts to any active incident (`PATCH /alerts/:id/associate`) or detach them (`PATCH /alerts/:id/unassociate`).
+
+
 
 

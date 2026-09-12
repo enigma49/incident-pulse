@@ -10,6 +10,7 @@ import {
   Activity,
   ListOrdered,
   Users,
+  Bell,
   LogIn,
   LogOut,
   UserCheck,
@@ -32,6 +33,7 @@ export default function Navbar() {
   const navItems = [
     { label: "Overview", href: "/", icon: Activity },
     { label: "Incident Queue", href: "/incidents", icon: ListOrdered },
+    { label: "Alert Stream", href: "/alerts", icon: Bell },
     { label: "Users & Teams", href: "/teams", icon: Users },
   ];
 

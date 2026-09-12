@@ -49,8 +49,11 @@ export interface Alert {
   timestamp: string;
   source: string;
   rawPayload: Record<string, any>;
-  incidentId?: string;
+  incidentId?: any;
   status: 'UNASSIGNED' | 'CORRELATED' | 'RESOLVED';
+  fingerprint?: string;
+  count?: number;
+  lastSeenAt?: string;
 }
 
 export interface Comment {
