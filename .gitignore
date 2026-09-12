@@ -37,3 +37,4 @@ logs/
 # Coverage
 coverage/
 *.lcov
+
