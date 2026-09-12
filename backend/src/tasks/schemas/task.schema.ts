@@ -24,11 +24,10 @@ export class Task {
     required: true,
     enum: TaskStatus,
     default: TaskStatus.PENDING,
-    index: true,
   })
   status: TaskStatus;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', default: null, index: true })
+  @Prop({ type: Types.ObjectId, ref: 'User', default: null })
   assigneeId?: Types.ObjectId;
 
   createdAt?: Date;

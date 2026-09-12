@@ -20,10 +20,10 @@ export class Alert {
   @Prop({ required: true, trim: true })
   severity: string;
 
-  @Prop({ required: true, trim: true, index: true })
+  @Prop({ required: true, trim: true })
   service: string;
 
-  @Prop({ required: true, default: () => new Date(), index: true })
+  @Prop({ required: true, default: () => new Date() })
   timestamp: Date;
 
   @Prop({ required: true, default: 'Prometheus' })
@@ -32,14 +32,13 @@ export class Alert {
   @Prop({ type: Object, default: {} })
   rawPayload: Record<string, any>;
 
-  @Prop({ type: Types.ObjectId, ref: 'Incident', default: null, index: true })
+  @Prop({ type: Types.ObjectId, ref: 'Incident', default: null })
   incidentId?: Types.ObjectId;
 
   @Prop({
     required: true,
     enum: AlertStatus,
     default: AlertStatus.UNASSIGNED,
-    index: true,
   })
   status: AlertStatus;
 

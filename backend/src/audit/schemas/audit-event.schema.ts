@@ -24,13 +24,13 @@ export class AuditEvent {
   @Prop({ type: String, default: 'system' })
   actorId: string;
 
-  @Prop({ required: true, index: true })
+  @Prop({ required: true })
   action: string;
 
   @Prop({ required: true })
   entity: string;
 
-  @Prop({ type: String, default: null, index: true })
+  @Prop({ type: String, default: null })
   entityId?: string;
 
   @Prop({ type: Object, default: {} })
