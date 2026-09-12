@@ -14,7 +14,7 @@ export class Alert {
   @Prop({ required: true, trim: true })
   title: string;
 
-  @Prop({ required: true, default: '' })
+  @Prop({ required: false, default: '' })
   description: string;
 
   @Prop({ required: true, trim: true })

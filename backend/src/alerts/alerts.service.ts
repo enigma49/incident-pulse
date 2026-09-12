@@ -179,7 +179,7 @@ export class AlertsService {
     // 2. Persist new alert
     const alert = new this.alertModel({
       title: dto.title,
-      description: dto.description || '',
+      description: dto.description || dto.title || 'No description provided.',
       severity: normalizedSeverity,
       service: dto.service,
       source: dto.source || 'Prometheus',
